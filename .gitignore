@@ -22,3 +22,10 @@ apps/api/secrets/
 *.keystore
 *.jks
 builds/
+
+# Razorpay key downloads
+rzp-key*.csv
+
+# SSH keys / server credentials
+oracle_*.txt
+*.pem

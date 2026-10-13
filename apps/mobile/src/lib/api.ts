@@ -5,7 +5,7 @@ import { storage } from './storage';
 const TOKEN_KEY = 'tw_session';
 
 export const API_URL: string =
-  process.env.EXPO_PUBLIC_API_URL ?? (Constants.expoConfig?.extra?.apiUrl as string | undefined) ?? 'http://localhost:4000';
+  process.env.EXPO_PUBLIC_API_URL ?? (Constants.expoConfig?.extra?.apiUrl as string | undefined) ?? 'https://testwise.duckdns.org';
 
 export class ApiError extends Error {
   constructor(

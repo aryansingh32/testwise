@@ -9,6 +9,7 @@ import { RewardsCard } from '../../components/RewardsCard';
 import { TournamentCard } from '../../components/TournamentCard';
 import { AppText, Avatar, Card, ErrorState, Loading, Screen, SectionHeader } from '../../components/ui';
 import { api } from '../../lib/api';
+import { CoinIcon, fmtCoins, useWallet } from '../../components/Wallet';
 import { useLocalized } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import { palette, radius } from '../../theme/tokens';
@@ -92,6 +93,21 @@ function Exams({ items }: { items: ExamDto[] }) {
         </Pressable>
       ))}
     </View>
+  );
+}
+
+/** Coin balance chip for the top bar; taps through to the wallet. Hidden when the wallet is switched off. */
+function CoinPill() {
+  const { t } = useTranslation();
+  const { config } = useSession();
+  const enabled = !!config?.['wallet.settings']?.enabled;
+  const w = useWallet();
+  if (!enabled) return null;
+  return (
+    <Pressable style={styles.coinPill} onPress={() => router.push('/wallet')} accessibilityRole="button" accessibilityLabel={t('wallet.title')}>
+      <CoinIcon size={18} />
+      <AppText weight="extrabold" size={13}>{w.data ? fmtCoins(w.data.wallet.available) : '–'}</AppText>
+    </Pressable>
   );
 }
 
@@ -208,11 +224,12 @@ export default function Home() {
             <AppText weight="semibold" size={9} color="#9CA3AF" style={{ letterSpacing: 1.5 }}>{t('common.tagline').toUpperCase()}</AppText>
           </View>
         </View>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
           <View style={styles.streakPill}>
             <Ionicons name="flame" size={14} color={palette.amber} />
             <AppText weight="extrabold" size={13}>{user?.streakDays ?? 1}</AppText>
           </View>
+          <CoinPill />
           <Pressable style={styles.iconBtn} onPress={() => router.push('/notifications')} accessibilityLabel={t('notifications.title')}>
             <Ionicons name="notifications-outline" size={20} color="#6B7280" />
             {!!data?.unreadNotifications && <View style={styles.badge}><AppText weight="extrabold" size={9} color="#FFFFFF">{data.unreadNotifications > 9 ? '9+' : data.unreadNotifications}</AppText></View>}
@@ -247,6 +264,7 @@ const styles = StyleSheet.create({
   logo: { width: 40, height: 40, borderRadius: 12, backgroundColor: palette.amber, alignItems: 'center', justifyContent: 'center' },
   iconBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F6F7F9', alignItems: 'center', justifyContent: 'center' },
   streakPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFF9F0', paddingHorizontal: 12, borderRadius: 20 },
+  coinPill: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#FFFBEB', paddingHorizontal: 10, borderRadius: 20 },
   pad: { paddingHorizontal: 20 },
   section: { marginTop: 28 },
   banner: { height: 172, borderRadius: radius.lg, padding: 20, overflow: 'hidden', justifyContent: 'space-between' },

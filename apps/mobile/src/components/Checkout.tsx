@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { formatRupees, type CheckoutDto, type OrderDto } from '@testwise/shared';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, ApiError } from '../lib/api';
 import { palette, radius } from '../theme/tokens';
@@ -17,6 +17,36 @@ export function CheckoutSheet({ checkout, onClose, onPaid }: { checkout: Checkou
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const paidRef = useRef(false);
+  const orderId = checkout?.order.id;
+  const hosted = !!checkout && checkout.provider !== 'MOCK';
+
+  // Hosted gateway: confirm automatically (poll while open + when the user returns from the payment page).
+  useEffect(() => {
+    if (!hosted || !orderId) return;
+    paidRef.current = false;
+    const poll = async () => {
+      if (paidRef.current) return;
+      try {
+        const r = await api<OrderDto>(`/v1/me/orders/${orderId}`);
+        if (r.status === 'PAID' && !paidRef.current) {
+          paidRef.current = true;
+          setMessage({ ok: true, text: t('checkout.success') });
+          onPaid(r);
+        } else if (r.status === 'FAILED' || r.status === 'CANCELLED') setMessage({ ok: false, text: t('checkout.failed') });
+      } catch {
+        /* transient network error: next tick retries */
+      }
+    };
+    const timer = setInterval(poll, 4000);
+    const sub = AppState.addEventListener('change', (st) => st === 'active' && void poll());
+    return () => {
+      clearInterval(timer);
+      sub.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hosted, orderId]);
+
   if (!checkout) return null;
   const o = checkout.order;
 
