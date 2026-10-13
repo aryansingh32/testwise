@@ -1,0 +1,1 @@
+ALTER TABLE "Duel" ADD COLUMN "botSeed" TEXT;

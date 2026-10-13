@@ -1,0 +1,1714 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------- Identity
+
+enum Language {
+  EN
+  HI
+}
+
+enum Audience {
+  SCHOOL
+  EXAM
+}
+
+enum AuthProvider {
+  PASSWORD
+  GOOGLE
+  PHONE
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id              String       @id @default(cuid())
+  email           String?      @unique
+  passwordHash    String?
+  firebaseUid     String?      @unique
+  phone           String?      @unique
+  authProvider    AuthProvider @default(PASSWORD)
+  displayName     String
+  avatarUrl       String?
+  language        Language     @default(EN)
+  audience        Audience?
+  classLevel      Int?
+  board           String?
+  dateOfBirth     DateTime?    @db.Date
+  guardianConsent Boolean      @default(false)
+  status          UserStatus   @default(ACTIVE)
+  onboardedAt     DateTime?
+  lastActiveOn    DateTime?    @db.Date
+  streakDays      Int          @default(0)
+  xp              Int          @default(0)
+  duelRating      Int          @default(1200)
+  duelWins        Int          @default(0)
+  duelLosses      Int          @default(0)
+  duelDraws       Int          @default(0)
+  duelStreak      Int          @default(0)
+  deletedAt       DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  exams                UserExam[]
+  refreshTokens        RefreshToken[]
+  registrations        Registration[]
+  attempts             Attempt[]
+  orders               Order[]
+  enrollments          Enrollment[]
+  tickets              SupportTicket[]
+  notifications        NotificationRead[]
+  xpEvents             XpEvent[]
+  devices              PushDevice[]
+  notificationSettings NotificationSetting[]
+  wallet               Wallet?
+  walletTxns           WalletTxn[]
+  redemptions          Redemption[]
+  proctorSessions      ProctorSession[]
+  attestedKeys         AttestedKey[]
+
+  @@index([createdAt])
+  @@index([xp(sort: Desc), createdAt])
+}
+
+model UserExam {
+  userId String
+  examId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exam   Exam   @relation(fields: [examId], references: [id], onDelete: Cascade)
+
+  @@id([userId, examId])
+}
+
+enum TokenOwner {
+  USER
+  ADMIN
+}
+
+/// Refresh tokens are stored hashed and rotated on every use.
+model RefreshToken {
+  id         String     @id @default(cuid())
+  owner      TokenOwner
+  userId     String?
+  adminId    String?
+  tokenHash  String     @unique
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  replacedBy String?
+  createdAt  DateTime   @default(now())
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  admin AdminUser? @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([adminId])
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  OPERATIONS
+  CONTENT
+  FINANCE
+  FRAUD
+  SUPPORT
+}
+
+model AdminUser {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         AdminRole
+  active       Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  refreshTokens RefreshToken[]
+}
+
+// ---------------------------------------------------------------- Taxonomy
+
+enum ExamCategory {
+  SCHOOL
+  COMPETITIVE
+}
+
+model Exam {
+  id        String       @id @default(cuid())
+  slug      String       @unique
+  nameEn    String
+  nameHi    String?
+  category  ExamCategory
+  icon      String       @default("book")
+  color     String       @default("#F59E0B")
+  sortOrder Int          @default(0)
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  users       UserExam[]
+  questions   Question[]
+  tournaments Tournament[]
+  tests       Test[]
+  series      TestSeries[]
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  nameEn    String
+  nameHi    String?
+  createdAt DateTime @default(now())
+
+  topics      Topic[]
+  questions   Question[]
+  tournaments Tournament[]
+}
+
+model Topic {
+  id        String   @id @default(cuid())
+  subjectId String
+  slug      String
+  nameEn    String
+  nameHi    String?
+  createdAt DateTime @default(now())
+
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@unique([subjectId, slug])
+}
+
+// ---------------------------------------------------------------- Questions
+
+enum QuestionType {
+  MCQ_SINGLE
+  MCQ_MULTI
+  NUMERIC
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QuestionStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  RETIRED
+}
+
+model Question {
+  id               String         @id @default(cuid())
+  refId            String?        @unique
+  type             QuestionType
+  difficulty       Difficulty
+  status           QuestionStatus @default(DRAFT)
+  examId           String?
+  subjectId        String
+  topicId          String?
+  classLevel       Int?
+  textEn           String
+  textHi           String?
+  solutionEn       String?
+  solutionHi       String?
+  imageUrl         String?
+  solutionImageUrl String?
+  correctLabels    String[]
+  correctNumeric   Float?
+  numericTolerance Float?
+  marks            Float          @default(1)
+  negativeMarks    Float          @default(0)
+  tags             String[]
+  source           String?
+  licence          String?
+  version          Int            @default(1)
+  reviewNote       String?
+  importBatchId    String?
+  createdById      String?
+  reviewedById     String?
+  reviewedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  exam        Exam?             @relation(fields: [examId], references: [id])
+  subject     Subject           @relation(fields: [subjectId], references: [id])
+  topic       Topic?            @relation(fields: [topicId], references: [id])
+  importBatch ImportBatch?      @relation(fields: [importBatchId], references: [id])
+  options     QuestionOption[]
+  versions    QuestionVersion[]
+  tests       TestQuestion[]
+
+  @@index([status])
+  @@index([examId, subjectId, difficulty])
+}
+
+model QuestionOption {
+  id         String  @id @default(cuid())
+  questionId String
+  label      String
+  textEn     String
+  textHi     String?
+  sortOrder  Int     @default(0)
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, label])
+}
+
+/// Immutable snapshot of a question taken before every edit.
+model QuestionVersion {
+  id          String   @id @default(cuid())
+  questionId  String
+  version     Int
+  snapshot    Json
+  changedById String?
+  createdAt   DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, version])
+}
+
+enum ImportStatus {
+  VALIDATED
+  IMPORTED
+  ROLLED_BACK
+}
+
+model ImportBatch {
+  id          String       @id @default(cuid())
+  fileName    String
+  status      ImportStatus @default(VALIDATED)
+  totalRows   Int
+  validRows   Int
+  errorRows   Int
+  /// Parsed rows ready to import, kept until commit.
+  rows        Json
+  errors      Json
+  createdById String
+  importedAt  DateTime?
+  createdAt   DateTime     @default(now())
+
+  questions Question[]
+}
+
+// ---------------------------------------------------------------- Tournaments
+
+enum TournamentStatus {
+  DRAFT
+  SCHEDULED
+  REG_OPEN
+  REG_CLOSED
+  LIVE
+  IN_REVIEW
+  FINAL
+  REWARDS_APPROVED
+  CLOSED
+  CANCELLED
+}
+
+enum TournamentFormat {
+  MASS
+  KNOCKOUT
+  LEAGUE
+  DUEL
+}
+
+enum EntryMode {
+  FREE
+  PAID
+}
+
+enum RewardType {
+  NONE
+  CASH
+  VOUCHER
+  SCHOLARSHIP
+  MERCHANDISE
+  MIXED
+}
+
+enum FundingSource {
+  PLATFORM
+  SPONSOR
+  ENTRY_FEES
+}
+
+model Tournament {
+  id                   String           @id @default(cuid())
+  slug                 String           @unique
+  titleEn              String
+  titleHi              String?
+  descriptionEn        String?
+  descriptionHi        String?
+  rulesEn              String?
+  rulesHi              String?
+  scoringEn            String?
+  scoringHi            String?
+  refundPolicyEn       String?
+  refundPolicyHi       String?
+  examId               String?
+  subjectId            String?
+  status               TournamentStatus @default(DRAFT)
+  format               TournamentFormat
+  entryMode            EntryMode
+  entryFeePaise        Int              @default(0)
+  platformFeePercent   Float            @default(0)
+  rewardType           RewardType
+  fundingSource        FundingSource
+  sponsorName          String?
+  prizeTiers           Json             @default("[]")
+  prizePoolPaise       Int              @default(0)
+  maxParticipants      Int
+  minParticipants      Int              @default(1)
+  registrationOpensAt  DateTime
+  registrationClosesAt DateTime
+  startsAt             DateTime
+  endsAt               DateTime
+  durationMinutes      Int
+  questionCount        Int
+  eligibility          Json             @default("{}")
+  bannerColor          String           @default("#1E3A8A")
+  bannerImageUrl       String?
+  featured             Boolean          @default(false)
+  testId               String?
+  proctorMode          ProctorMode      @default(OFF)
+  proctorOptions       Json             @default("{}")
+  publishedAt          DateTime?
+  cancelledReason      String?
+  resultsFinalizedAt   DateTime?
+  createdById          String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  exam           Exam?                  @relation(fields: [examId], references: [id])
+  subject        Subject?               @relation(fields: [subjectId], references: [id])
+  test           Test?                  @relation(fields: [testId], references: [id])
+  ruleChanges    TournamentRuleChange[]
+  registrations  Registration[]
+  attempts       Attempt[]
+  resultVersions ResultVersion[]
+
+  @@index([status, startsAt])
+}
+
+/// Public, append-only history of rule changes after publication.
+model TournamentRuleChange {
+  id           String   @id @default(cuid())
+  tournamentId String
+  summaryEn    String
+  summaryHi    String?
+  changedById  String?
+  createdAt    DateTime @default(now())
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+}
+
+enum RegistrationStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+}
+
+model Registration {
+  id           String             @id @default(cuid())
+  tournamentId String
+  userId       String
+  status       RegistrationStatus
+  orderId      String?            @unique
+  checkedInAt  DateTime?
+  cancelReason String?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id])
+  user       User       @relation(fields: [userId], references: [id])
+  order      Order?     @relation(fields: [orderId], references: [id])
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId, status])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------- CMS
+
+enum BannerLinkType {
+  NONE
+  TOURNAMENT
+  EXAM
+  SERIES
+  URL
+}
+
+model Banner {
+  id         String         @id @default(cuid())
+  tagEn      String?
+  tagHi      String?
+  titleEn    String
+  titleHi    String?
+  subtitleEn String?
+  subtitleHi String?
+  ctaEn      String?
+  ctaHi      String?
+  color      String         @default("#F59E0B")
+  imageUrl   String?
+  linkType   BannerLinkType @default(NONE)
+  linkTarget String?
+  sortOrder  Int            @default(0)
+  active     Boolean        @default(true)
+  startsAt   DateTime?
+  endsAt     DateTime?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model HomeSection {
+  key       String  @id
+  titleEn   String
+  titleHi   String?
+  enabled   Boolean @default(true)
+  sortOrder Int     @default(0)
+}
+
+// ---------------------------------------------------------------- Config & audit
+
+model AppConfig {
+  key         String   @id
+  value       Json
+  version     Int      @default(1)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+model ConfigChange {
+  id          String   @id @default(cuid())
+  key         String
+  version     Int
+  oldValue    Json?
+  newValue    Json
+  changedById String
+  createdAt   DateTime @default(now())
+
+  @@index([key, createdAt])
+}
+
+enum ActorType {
+  ADMIN
+  USER
+  SYSTEM
+}
+
+/// Append-only. UPDATE and DELETE are blocked by a database trigger.
+model AuditEvent {
+  id         String    @id @default(cuid())
+  actorType  ActorType
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  meta       Json?
+  ip         String?
+  createdAt  DateTime  @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------- Tests (M3)
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum TestKind {
+  MOCK
+  SECTIONAL
+  PRACTICE
+  PREVIOUS_YEAR
+  TOURNAMENT
+}
+
+enum AnswerKeyPolicy {
+  ON_SUBMIT
+  AFTER_WINDOW
+  AFTER_FINAL
+  NEVER
+}
+
+model Test {
+  id                  String          @id @default(cuid())
+  titleEn             String
+  titleHi             String?
+  instructionsEn      String?
+  instructionsHi      String?
+  examId              String?
+  kind                TestKind        @default(MOCK)
+  status              TestStatus      @default(DRAFT)
+  durationMinutes     Int
+  shuffleQuestions    Boolean         @default(false)
+  shuffleOptions      Boolean         @default(false)
+  allowLanguageSwitch Boolean         @default(true)
+  answerKeyPolicy     AnswerKeyPolicy @default(ON_SUBMIT)
+  maxAttempts         Int             @default(1)
+  proctorMode         ProctorMode     @default(OFF)
+  proctorOptions      Json            @default("{}")
+  publishedAt         DateTime?
+  createdById         String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  exam        Exam?          @relation(fields: [examId], references: [id])
+  sections    TestSection[]
+  questions   TestQuestion[]
+  attempts    Attempt[]
+  series      SeriesTest[]
+  tournaments Tournament[]
+}
+
+model TestSection {
+  id        String  @id @default(cuid())
+  testId    String
+  titleEn   String
+  titleHi   String?
+  sortOrder Int     @default(0)
+
+  test      Test           @relation(fields: [testId], references: [id], onDelete: Cascade)
+  questions TestQuestion[]
+}
+
+model TestQuestion {
+  id            String @id @default(cuid())
+  testId        String
+  sectionId     String
+  questionId    String
+  sortOrder     Int    @default(0)
+  marks         Float?
+  negativeMarks Float?
+
+  test     Test        @relation(fields: [testId], references: [id], onDelete: Cascade)
+  section  TestSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id])
+
+  @@unique([testId, questionId])
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_SUBMITTED
+}
+
+model Attempt {
+  id           String        @id @default(cuid())
+  userId       String
+  testId       String
+  tournamentId String?
+  attemptNo    Int           @default(1)
+  status       AttemptStatus @default(IN_PROGRESS)
+  language     Language      @default(EN)
+  startedAt    DateTime      @default(now())
+  deadlineAt   DateTime
+  submittedAt  DateTime?
+  /// Frozen question order, options order and answer key at start time.
+  paper        Json
+  score        Float?
+  maxScore     Float?
+  correctCount Int?
+  wrongCount   Int?
+  skippedCount Int?
+  accuracy     Float?
+  timeTakenSec Int?
+  createdAt    DateTime      @default(now())
+
+  user       User            @relation(fields: [userId], references: [id])
+  test       Test            @relation(fields: [testId], references: [id])
+  tournament Tournament?     @relation(fields: [tournamentId], references: [id])
+  answers    AttemptAnswer[]
+  events     AttemptEvent[]
+  proctor    ProctorSession?
+
+  @@unique([userId, tournamentId, attemptNo])
+  @@index([userId, status])
+  @@index([tournamentId, status])
+  @@index([status, deadlineAt])
+  @@index([userId, testId])
+}
+
+model AttemptAnswer {
+  id              String   @id @default(cuid())
+  attemptId       String
+  questionId      String
+  selectedLabels  String[]
+  numericValue    Float?
+  markedForReview Boolean  @default(false)
+  visited         Boolean  @default(true)
+  timeSpentSec    Int      @default(0)
+  changeCount     Int      @default(0)
+  isCorrect       Boolean?
+  marksAwarded    Float?
+  updatedAt       DateTime @updatedAt
+
+  attempt Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+}
+
+/// Integrity log: app backgrounding, disconnects, language switches.
+model AttemptEvent {
+  id              String    @id @default(cuid())
+  attemptId       String
+  type            String
+  meta            Json?
+  /// Random per app session; deliberately not a persistent hardware identifier.
+  clientSessionId String?
+  eventId         String?
+  sequence        Int?
+  clientAt        DateTime?
+  platform        String?
+  appVersion      String?
+  osVersion       String?
+  deviceModel     String?
+  /// Explainable event weight for review triage; never an automatic cheating verdict.
+  riskPoints      Int       @default(0)
+  at              DateTime  @default(now())
+
+  attempt Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, clientSessionId, eventId])
+  @@unique([attemptId, clientSessionId, sequence])
+  @@index([attemptId])
+  @@index([attemptId, at])
+}
+
+// ---------------------------------------------------------------- Store
+
+enum SeriesStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model TestSeries {
+  id            String       @id @default(cuid())
+  slug          String       @unique
+  titleEn       String
+  titleHi       String?
+  descriptionEn String?
+  descriptionHi String?
+  examId        String?
+  pricePaise    Int          @default(0)
+  mrpPaise      Int?
+  validityDays  Int          @default(365)
+  color         String       @default("#F59E0B")
+  imageUrl      String?
+  badgeEn       String?
+  badgeHi       String?
+  /// [{ en, hi }] bullet list shown on the detail page
+  features      Json         @default("[]")
+  status        SeriesStatus @default(DRAFT)
+  featured      Boolean      @default(false)
+  sortOrder     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  exam        Exam?        @relation(fields: [examId], references: [id])
+  tests       SeriesTest[]
+  enrollments Enrollment[]
+}
+
+model SeriesTest {
+  seriesId    String
+  testId      String
+  sortOrder   Int     @default(0)
+  freePreview Boolean @default(false)
+
+  series TestSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  test   Test       @relation(fields: [testId], references: [id])
+
+  @@id([seriesId, testId])
+  @@index([testId])
+}
+
+enum EnrollmentSource {
+  PURCHASE
+  FREE
+  ADMIN_GRANT
+}
+
+model Enrollment {
+  id        String           @id @default(cuid())
+  userId    String
+  seriesId  String
+  source    EnrollmentSource
+  orderId   String?          @unique
+  startsAt  DateTime         @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime         @default(now())
+
+  user   User       @relation(fields: [userId], references: [id])
+  series TestSeries @relation(fields: [seriesId], references: [id])
+  order  Order?     @relation(fields: [orderId], references: [id])
+
+  @@unique([userId, seriesId])
+}
+
+model Coupon {
+  id             String    @id @default(cuid())
+  code           String    @unique
+  descriptionEn  String?
+  percentOff     Int?
+  amountOffPaise Int?
+  maxUses        Int?
+  usedCount      Int       @default(0)
+  appliesTo      String    @default("ALL") // ALL | SERIES | TOURNAMENT
+  startsAt       DateTime?
+  endsAt         DateTime?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+}
+
+// ---------------------------------------------------------------- Payments & ledger (M4)
+
+enum OrderKind {
+  TOURNAMENT_ENTRY
+  SERIES_PURCHASE
+  COIN_TOPUP
+}
+
+enum OrderStatus {
+  CREATED
+  PAID
+  FAILED
+  CANCELLED
+  REFUND_PENDING
+  REFUNDED
+}
+
+model Order {
+  id                String      @id @default(cuid())
+  receiptNo         String      @unique
+  userId            String
+  kind              OrderKind
+  refId             String
+  descriptionEn     String
+  amountPaise       Int
+  discountPaise     Int         @default(0)
+  couponCode        String?
+  currency          String      @default("INR")
+  status            OrderStatus @default(CREATED)
+  provider          String
+  providerOrderId   String?     @unique
+  providerPaymentId String?
+  checkoutUrl       String?
+  idempotencyKey    String      @unique
+  failureReason     String?
+  paidAt            DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id])
+  registration Registration?
+  enrollment   Enrollment?
+  refunds      Refund[]
+  events       PaymentEvent[]
+
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+/// Every gateway webhook received. eventId is unique to reject replays.
+model PaymentEvent {
+  id             String    @id @default(cuid())
+  provider       String
+  eventId        String
+  type           String
+  orderId        String?
+  signatureValid Boolean
+  payload        Json
+  processedAt    DateTime?
+  error          String?
+  receivedAt     DateTime  @default(now())
+
+  order Order? @relation(fields: [orderId], references: [id])
+
+  @@unique([provider, eventId])
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSED
+  FAILED
+}
+
+model Refund {
+  id               String       @id @default(cuid())
+  orderId          String
+  amountPaise      Int
+  reason           String
+  status           RefundStatus @default(REQUESTED)
+  requestedBy      String // admin id, user id or SYSTEM
+  approvedById     String?
+  secondApproverId String?
+  providerRefundId String?
+  processedAt      DateTime?
+  createdAt        DateTime     @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+/// Double-entry ledger. Each txnId's debits equal its credits. Never updated.
+model LedgerEntry {
+  id           String   @id @default(cuid())
+  txnId        String
+  account      String
+  debitPaise   Int      @default(0)
+  creditPaise  Int      @default(0)
+  orderId      String?
+  tournamentId String?
+  memo         String
+  createdAt    DateTime @default(now())
+
+  @@index([txnId])
+  @@index([account])
+  @@index([orderId])
+}
+
+// ---------------------------------------------------------------- Results (M5)
+
+enum ResultStatus {
+  PROVISIONAL
+  FINAL
+  SUPERSEDED
+}
+
+model ResultVersion {
+  id            String       @id @default(cuid())
+  tournamentId  String
+  version       Int
+  status        ResultStatus
+  notes         String?
+  publishedById String?
+  publishedAt   DateTime     @default(now())
+  verifyCode    String       @unique
+
+  tournament Tournament    @relation(fields: [tournamentId], references: [id])
+  entries    ResultEntry[]
+
+  @@unique([tournamentId, version])
+}
+
+enum RewardStatus {
+  NONE
+  ELIGIBLE
+  APPROVED
+  PAID
+  WITHHELD
+}
+
+model ResultEntry {
+  id           String       @id @default(cuid())
+  versionId    String
+  userId       String
+  attemptId    String
+  rank         Int?
+  score        Float
+  adjustment   Float        @default(0)
+  adjustReason String?
+  accuracy     Float
+  timeTakenSec Int
+  submittedAt  DateTime
+  percentile   Float?
+  disqualified Boolean      @default(false)
+  dqReason     String?
+  rewardEn     String?
+  rewardHi     String?
+  rewardPaise  Int          @default(0)
+  rewardStatus RewardStatus @default(NONE)
+  payoutRef    String?
+
+  version ResultVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, userId])
+  @@index([versionId, rank])
+}
+
+// ---------------------------------------------------------------- Engagement
+
+model XpEvent {
+  id        String   @id @default(cuid())
+  userId    String
+  amount    Int
+  reason    String
+  refId     String?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reason, refId])
+  @@index([userId, createdAt])
+}
+
+model Notification {
+  id           String   @id @default(cuid())
+  /// null = broadcast to everyone (or to tournament participants when tournamentId is set)
+  userId       String?
+  tournamentId String?
+  category     String   @default("ACCOUNT")
+  eventKey     String?
+  campaignId   String?
+  /// Push batch this row belongs to (used to record opens from a tapped push).
+  batchId      String?
+  /// false = push-only (not shown in the in-app inbox)
+  inbox        Boolean  @default(true)
+  data         Json?
+  titleEn      String
+  titleHi      String?
+  bodyEn       String
+  bodyHi       String?
+  link         String?
+  createdById  String?
+  createdAt    DateTime @default(now())
+
+  reads    NotificationRead[]
+  campaign NotificationCampaign? @relation(fields: [campaignId], references: [id])
+  outbox   PushOutbox[]
+
+  @@index([userId, createdAt])
+  @@index([campaignId])
+  @@index([batchId])
+}
+
+model NotificationRead {
+  notificationId String
+  userId         String
+  readAt         DateTime  @default(now())
+  openedAt       DateTime?
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([notificationId, userId])
+}
+
+model Faq {
+  id         String  @id @default(cuid())
+  category   String  @default("GENERAL")
+  questionEn String
+  questionHi String?
+  answerEn   String
+  answerHi   String?
+  sortOrder  Int     @default(0)
+  active     Boolean @default(true)
+}
+
+enum TicketStatus {
+  OPEN
+  ANSWERED
+  CLOSED
+}
+
+enum TicketCategory {
+  GENERAL
+  PAYMENT
+  RESULT_APPEAL
+  TECHNICAL
+  ACCOUNT
+  DATA_DELETION
+}
+
+model SupportTicket {
+  id           String         @id @default(cuid())
+  userId       String
+  category     TicketCategory
+  subject      String
+  status       TicketStatus   @default(OPEN)
+  tournamentId String?
+  orderId      String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id])
+  messages TicketMessage[]
+
+  @@index([status, updatedAt])
+}
+
+model TicketMessage {
+  id        String   @id @default(cuid())
+  ticketId  String
+  fromAdmin Boolean
+  authorId  String
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------- Push notifications
+
+enum PushProvider {
+  FCM
+  APNS
+}
+
+model PushDevice {
+  id         String       @id @default(cuid())
+  userId     String
+  token      String       @unique
+  provider   PushProvider
+  platform   String
+  appVersion String?
+  locale     String?
+  active     Boolean      @default(true)
+  lastSeenAt DateTime     @default(now())
+  createdAt  DateTime     @default(now())
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries PushDelivery[]
+
+  @@index([userId, active])
+}
+
+/// Admin-editable text and channel switches per notification event.
+model NotificationTemplate {
+  key         String   @id
+  titleEn     String
+  titleHi     String
+  bodyEn      String
+  bodyHi      String
+  push        Boolean
+  inbox       Boolean
+  enabled     Boolean  @default(true)
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Per-student push opt-outs by category.
+model NotificationSetting {
+  userId   String
+  category String
+  push     Boolean
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, category])
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+/// Push fan-out queue. One row per notification; the worker resolves devices and sends in batches.
+model PushOutbox {
+  id             String       @id @default(cuid())
+  notificationId String
+  audience       String // USER | USERS | TOURNAMENT | ALL
+  userId         String?
+  userIds        String[]
+  tournamentId   String?
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  nextAttemptAt  DateTime     @default(now())
+  cursor         String?
+  sent           Int          @default(0)
+  failed         Int          @default(0)
+  skipped        Int          @default(0)
+  error          String?
+  createdAt      DateTime     @default(now())
+  finishedAt     DateTime?
+
+  notification Notification   @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  deliveries   PushDelivery[]
+
+  @@index([status, nextAttemptAt])
+}
+
+enum DeliveryStatus {
+  SENT
+  FAILED
+  INVALID_TOKEN
+  SKIPPED
+}
+
+model PushDelivery {
+  id        String         @id @default(cuid())
+  outboxId  String
+  deviceId  String?
+  userId    String
+  provider  String
+  status    DeliveryStatus
+  error     String?
+  createdAt DateTime       @default(now())
+
+  outbox PushOutbox  @relation(fields: [outboxId], references: [id], onDelete: Cascade)
+  device PushDevice? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([outboxId])
+  @@index([createdAt])
+}
+
+enum CampaignStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  CANCELLED
+  FAILED
+}
+
+model NotificationCampaign {
+  id          String         @id @default(cuid())
+  audience    String
+  filter      Json
+  category    String
+  titleEn     String
+  titleHi     String?
+  bodyEn      String
+  bodyHi      String?
+  link        String?
+  push        Boolean
+  inbox       Boolean
+  sendAt      DateTime
+  status      CampaignStatus @default(SCHEDULED)
+  targetCount Int            @default(0)
+  error       String?
+  createdById String
+  createdAt   DateTime       @default(now())
+  sentAt      DateTime?
+
+  notifications Notification[]
+
+  @@index([status, sendAt])
+}
+
+/// De-duplicates automatic reminders (one row per reminder key).
+model ReminderLog {
+  key       String   @id
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------- Duels (M6)
+
+model BotPersona {
+  id        String   @id @default(cuid())
+  name      String
+  city      String?
+  color     String   @default("#8B5CF6")
+  ratingMin Int
+  ratingMax Int
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  duels Duel[]
+}
+
+enum DuelStatus {
+  WAITING
+  ACTIVE
+  FINISHED
+  CANCELLED
+  ABANDONED
+}
+
+enum DuelMode {
+  RANKED
+  FRIEND
+  PAID
+}
+
+model Duel {
+  id                 String     @id @default(cuid())
+  mode               DuelMode   @default(RANKED)
+  status             DuelStatus @default(WAITING)
+  examId             String?
+  inviteCode         String?    @unique
+  playerAId          String
+  playerBId          String?
+  botPersonaId       String?
+  botRating          Int?
+  /// Server-only replay seed. Never included in student DTOs.
+  botSeed            String?
+  paper              Json?
+  questionCount      Int
+  secondsPerQuestion Int
+  scoreA             Int        @default(0)
+  scoreB             Int        @default(0)
+  winner             String? // A | B | DRAW
+  ratingABefore      Int?
+  ratingAAfter       Int?
+  ratingBBefore      Int?
+  ratingBAfter       Int?
+  rematchOfId        String?
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  createdAt          DateTime   @default(now())
+
+  botPersona BotPersona?  @relation(fields: [botPersonaId], references: [id])
+  answers    DuelAnswer[]
+
+  @@index([playerAId, createdAt])
+  @@index([playerBId, createdAt])
+  @@index([status])
+}
+
+model DuelAnswer {
+  id             String   @id @default(cuid())
+  duelId         String
+  side           String // A | B
+  questionIndex  Int
+  selectedLabels String[]
+  isCorrect      Boolean
+  timeMs         Int
+  points         Int
+  createdAt      DateTime @default(now())
+
+  duel Duel @relation(fields: [duelId], references: [id], onDelete: Cascade)
+
+  @@unique([duelId, side, questionIndex])
+}
+
+// ---------------------------------------------------------------- Wallet & rewards
+
+/// Coin balances. PURCHASED coins come from top-ups and can never be cashed out to UPI;
+/// EARNED coins come from prizes, duels and admin grants. HELD coins back pending redemptions.
+model Wallet {
+  userId            String   @id
+  purchased         Int      @default(0)
+  earned            Int      @default(0)
+  held              Int      @default(0)
+  lifetimePurchased Int      @default(0)
+  lifetimeEarned    Int      @default(0)
+  frozen            Boolean  @default(false)
+  frozenReason      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+enum WalletTxnType {
+  TOPUP
+  TOPUP_REFUND
+  EARN_PRIZE
+  EARN_DUEL
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+  REDEEM_HOLD
+  REDEEM_RELEASE
+  REDEEM_SETTLE
+  DUEL_ENTRY
+  DUEL_REFUND
+  DUEL_PRIZE
+  GAME_REWARD
+}
+
+/// Append-only coin movements (DB trigger blocks UPDATE/DELETE). Deltas are signed.
+model WalletTxn {
+  id             String        @id @default(cuid())
+  userId         String
+  type           WalletTxnType
+  purchasedDelta Int           @default(0)
+  earnedDelta    Int           @default(0)
+  heldDelta      Int           @default(0)
+  purchasedAfter Int
+  earnedAfter    Int
+  heldAfter      Int
+  memo           String
+  refType        String?
+  refId          String?
+  actorId        String?
+  idempotencyKey String?       @unique
+  createdAt      DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([refType, refId])
+}
+
+model CoinPack {
+  id         String   @id @default(cuid())
+  titleEn    String
+  titleHi    String?
+  coins      Int
+  bonusCoins Int      @default(0)
+  pricePaise Int
+  badgeEn    String?
+  badgeHi    String?
+  active     Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+enum RewardKind {
+  MERCH
+  VOUCHER
+  UPI_CASH
+  OTHER
+}
+
+model RewardItem {
+  id                  String     @id @default(cuid())
+  kind                RewardKind
+  titleEn             String
+  titleHi             String?
+  descriptionEn       String?
+  descriptionHi       String?
+  termsEn             String?
+  termsHi             String?
+  imageUrl            String?
+  brand               String?
+  coinCost            Int
+  /// UPI payout amount, or voucher face value.
+  valuePaise          Int        @default(0)
+  /// What one unit costs the platform (merch unit cost, voucher purchase price, UPI payout).
+  costPaise           Int        @default(0)
+  variants            String[]   @default([])
+  /// Null = unlimited. Vouchers use their unassigned codes as stock.
+  stock               Int?
+  perUserLimit        Int?
+  requiresAddress     Boolean    @default(false)
+  allowPurchasedCoins Boolean    @default(true)
+  autoApprove         Boolean    @default(false)
+  active              Boolean    @default(true)
+  sortOrder           Int        @default(0)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  codes       VoucherCode[]
+  redemptions Redemption[]
+}
+
+model VoucherCode {
+  id           String    @id @default(cuid())
+  rewardId     String
+  code         String
+  pin          String?
+  expiresAt    DateTime?
+  redemptionId String?   @unique
+  createdAt    DateTime  @default(now())
+
+  reward RewardItem @relation(fields: [rewardId], references: [id], onDelete: Cascade)
+
+  @@unique([rewardId, code])
+  @@index([rewardId, redemptionId])
+}
+
+enum RedemptionStatus {
+  PENDING
+  APPROVED
+  FULFILLED
+  REJECTED
+  CANCELLED
+  FAILED
+}
+
+model Redemption {
+  id              String           @id @default(cuid())
+  userId          String
+  rewardId        String
+  coins           Int
+  fromPurchased   Int
+  fromEarned      Int
+  status          RedemptionStatus @default(PENDING)
+  variant         String?
+  shippingAddress Json?
+  upiVpa          String?
+  voucherCode     String?
+  voucherPin      String?
+  payoutRef       String?
+  carrier         String?
+  trackingNo      String?
+  adminNote       String?
+  rejectReason    String?
+  costPaise       Int              @default(0)
+  idempotencyKey  String           @unique
+  reviewedById    String?
+  reviewedAt      DateTime?
+  fulfilledAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  user   User       @relation(fields: [userId], references: [id])
+  reward RewardItem @relation(fields: [rewardId], references: [id])
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------- Proctoring
+
+enum ProctorMode {
+  OFF
+  BASIC
+  AI
+  LIVE
+}
+
+enum ProctorSessionStatus {
+  ACTIVE
+  ENDED
+  TERMINATED
+}
+
+enum FlagSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum FlagStatus {
+  OPEN
+  CONFIRMED
+  DISMISSED
+}
+
+model ProctorSession {
+  id             String               @id @default(cuid())
+  attemptId      String               @unique
+  userId         String
+  tournamentId   String?
+  testId         String
+  mode           ProctorMode
+  status         ProctorSessionStatus @default(ACTIVE)
+  consentAt      DateTime
+  consentVersion String
+  device         Json?
+  integrity      Json?
+  deviceId       String?
+  riskScore      Int                  @default(0)
+  warningCount   Int                  @default(0)
+  flagCount      Int                  @default(0)
+  appState       String?
+  questionIndex  Int?
+  answered       Int                  @default(0)
+  faces          Int?
+  snapshotKey    String?
+  snapshotAt     DateTime?
+  lastSeenAt     DateTime?
+  liveRequested  Boolean              @default(false)
+  /// Result of the last Play Integrity / App Attest verification (verdict summary, never the raw token).
+  attestation    Json?
+  attestedAt     DateTime?
+  /// LiveKit room key chosen at preflight so the consent screen can start streaming before the attempt exists.
+  liveRoom       String?
+  /// What the student agreed to and why each permission was asked (purposes, text version, time).
+  consent        Json?
+  network        Json?
+  /// Resolved proctoring switches for this attempt (mode preset + exam overrides + policy ceiling).
+  features       Json?
+  createdAt      DateTime             @default(now())
+  endedAt        DateTime?
+
+  attempt   Attempt           @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id])
+  flags     ProctorFlag[]
+  actions   ProctorAction[]
+  snapshots ProctorSnapshot[]
+
+  @@index([tournamentId, status])
+  @@index([status, lastSeenAt])
+  @@index([userId])
+}
+
+model ProctorFlag {
+  id           String       @id @default(cuid())
+  sessionId    String
+  attemptId    String
+  userId       String
+  tournamentId String?
+  type         String
+  severity     FlagSeverity
+  /// DEVICE (reported by the app), SERVER (detected by the API), ADMIN (proctor note)
+  source       String
+  confidence   Float?
+  message      String
+  details      Json         @default("{}")
+  /// [{ key, kind: image|audio, mime }] in private storage
+  evidence     Json         @default("[]")
+  points       Int          @default(0)
+  status       FlagStatus   @default(OPEN)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  occurredAt   DateTime     @default(now())
+  createdAt    DateTime     @default(now())
+
+  session ProctorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([status, severity, createdAt])
+  @@index([sessionId, createdAt])
+  @@index([tournamentId, status])
+}
+
+enum ProctorActionType {
+  WARN
+  TERMINATE
+  BLOCK
+  LIVE_VIEW
+  LIVE_END
+  FLAG_CONFIRMED
+  FLAG_DISMISSED
+  NOTE
+  DISQUALIFY
+  DEVICE_BAN
+  REINSTATE
+}
+
+model ProctorAction {
+  id        String            @id @default(cuid())
+  sessionId String
+  userId    String
+  type      ProctorActionType
+  /// SYSTEM or ADMIN
+  actor     String
+  adminId   String?
+  flagId    String?
+  message   String?
+  createdAt DateTime          @default(now())
+
+  session ProctorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model ProctorSnapshot {
+  id        String   @id @default(cuid())
+  sessionId String
+  key       String
+  faces     Int?
+  takenAt   DateTime @default(now())
+
+  session ProctorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, takenAt])
+  @@index([takenAt])
+}
+
+/// iOS App Attest key registered by one user's app install. The private key never leaves the Secure Enclave.
+model AttestedKey {
+  id         String   @id @default(cuid())
+  keyId      String   @unique
+  userId     String
+  publicKey  String
+  counter    Int      @default(0)
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Devices (by salted hash of the per-install id or attested key id) barred from proctored tests by a human decision.
+model BannedDevice {
+  id         String    @id @default(cuid())
+  deviceHash String    @unique
+  userId     String?
+  reason     String
+  adminId    String?
+  sessionId  String?
+  createdAt  DateTime  @default(now())
+  liftedAt   DateTime?
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------- Paid (coin) duels
+
+enum DuelOfferStatus {
+  DRAFT
+  LIVE
+  PAUSED
+  CLOSED
+}
+
+enum DuelRoomStatus {
+  OPEN
+  WAITING
+  MATCHED
+  ACTIVE
+  FINISHED
+  CANCELLED
+}
+
+/// A batch of identical 1v1 coin duels created by an admin (e.g. 20 rooms, entry 50, prize 100).
+/// Amounts are in coins and are copied onto every room, so editing an offer never changes a room already joined.
+model DuelOffer {
+  id                 String          @id @default(cuid())
+  titleEn            String
+  titleHi            String?
+  examId             String?
+  entryCoins         Int
+  prizeCoins         Int
+  questionCount      Int
+  secondsPerQuestion Int
+  status             DuelOfferStatus @default(DRAFT)
+  /// Same shape as tournament eligibility: audience, classLevels, examIds, age. Empty = everyone.
+  eligibility        Json            @default("{}")
+  createdById        String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  rooms DuelRoom[]
+
+  @@index([status])
+}
+
+model DuelRoom {
+  id           String         @id @default(cuid())
+  offerId      String
+  seq          Int
+  status       DuelRoomStatus @default(OPEN)
+  entryCoins   Int
+  prizeCoins   Int
+  playerAId    String?
+  playerBId    String?
+  duelId       String?        @unique
+  /// Increments each time the room is (re)opened by a first player, so each fill of the room has its own ledger keys.
+  cycle        Int            @default(0)
+  winnerId     String?
+  /// A waiting player is refunded and the room reopens after this time.
+  waitingUntil DateTime?
+  /// Both players must come online before this time or the room is cancelled and both are refunded.
+  readyBy      DateTime?
+  matchedAt    DateTime?
+  settledAt    DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  offer DuelOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, seq])
+  @@index([offerId, status])
+  @@index([playerAId])
+  @@index([playerBId])
+  @@index([status, waitingUntil])
+}

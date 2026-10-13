@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ProctorActionType" ADD VALUE IF NOT EXISTS 'REINSTATE';

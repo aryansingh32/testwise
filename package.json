@@ -1,0 +1,19 @@
+{
+  "name": "testwise",
+  "private": true,
+  "scripts": {
+    "build:shared": "pnpm --filter @testwise/shared build",
+    "dev:api": "pnpm --filter @testwise/api dev",
+    "dev:admin": "pnpm --filter @testwise/admin dev",
+    "dev:mobile": "pnpm --filter @testwise/mobile start",
+    "db:up": "docker compose up -d",
+    "db:migrate": "pnpm --filter @testwise/api prisma:deploy",
+    "db:seed": "pnpm --filter @testwise/api seed",
+    "typecheck": "pnpm -r typecheck",
+    "load-test:api": "node apps/api/scripts/load-test.mjs",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

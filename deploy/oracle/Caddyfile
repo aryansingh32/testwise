@@ -1,0 +1,63 @@
+# Runs with network_mode: host (real client IPs for rate limiting, direct 80/443).
+# {$DOMAIN} must have an A record pointing at this VM so Caddy can get a Let's Encrypt certificate.
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Realtime (duels + proctoring) is served by the single worker that owns that state.
+	handle /socket.io/* {
+		reverse_proxy 127.0.0.1:4010
+	}
+
+	# Live proctoring video signalling (media itself flows over 7881/tcp + 7882/udp).
+	handle_path /livekit/* {
+		reverse_proxy 127.0.0.1:7880
+	}
+
+	# HTTP API: two stateless replicas, least-connections, drained automatically when /health says 503.
+	@api path /v1/* /health /verify/* /uploads/*
+	handle @api {
+		reverse_proxy 127.0.0.1:4001 127.0.0.1:4002 {
+			lb_policy least_conn
+			lb_try_duration 3s
+			health_uri /health
+			health_interval 5s
+			health_timeout 2s
+			fail_duration 10s
+		}
+	}
+
+	# Dotfiles (.env, .git/...) are never served; /.well-known/ stays available (mobile app-link verification).
+	@dotfiles {
+		path */.*
+		not path /.well-known/*
+	}
+	handle @dotfiles {
+		respond "Not Found" 404
+	}
+
+	# A missing file-like path (old hashed script, /package.json, ...) is a real 404, not the app shell.
+	@missingfile {
+		path_regexp ext \.[A-Za-z0-9]{1,8}$
+		not file {
+			root /srv/admin
+		}
+	}
+	handle @missingfile {
+		respond "Not Found" 404
+	}
+
+	# Everything else is the admin console (single-page app): extension-less routes fall back to index.html.
+	handle {
+		root * /srv/admin
+		try_files {path} /index.html
+		header /index.html Cache-Control "no-cache"
+		file_server
+	}
+}

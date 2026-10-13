@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', 'Noto Sans Devanagari', ui-sans-serif, system-ui, sans-serif;
+  --color-brand-50: #fffbeb;
+  --color-brand-100: #fef3c7;
+  --color-brand-500: #f59e0b;
+  --color-brand-600: #d97706;
+  --color-brand-700: #b45309;
+  --color-ink: #1f2937;
+  --color-arena: #0b1530;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #f6f7f9;
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+.hindi {
+  font-family: 'Noto Sans Devanagari', 'Plus Jakarta Sans', sans-serif;
+}

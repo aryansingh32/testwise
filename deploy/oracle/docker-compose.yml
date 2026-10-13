@@ -1,0 +1,142 @@
+# Testwise production stack.  Run on the VM from /opt/testwise:
+#   docker compose --env-file /opt/testwise/.env -f src/deploy/oracle/docker-compose.yml up -d --build
+name: testwise
+
+x-api: &api
+  image: testwise-api:latest
+  restart: unless-stopped
+  networks: [internal]
+  env_file: [/opt/testwise/app.env]
+  environment: &api-env
+    NODE_ENV: production
+    PORT: "4000"
+    DATABASE_URL: postgresql://testwise:${POSTGRES_PASSWORD}@postgres:5432/testwise?connection_limit=25&pool_timeout=10&connect_timeout=3
+    REDIS_URL: redis://redis:6379
+    SHUTDOWN_DELAY_MS: "3000"
+    FIREBASE_SERVICE_ACCOUNT_PATH: secrets/firebase-adminsdk.json
+    PLAY_INTEGRITY_SA_FILE: secrets/firebase-adminsdk.json
+    SHUTDOWN_TIMEOUT_MS: "25000"
+  volumes:
+    - uploads:/repo/apps/api/uploads
+    - private_uploads:/repo/apps/api/private-uploads
+    # Firebase Admin key (push notifications, Play Integrity). Owned by uid 1000 (the container's `node` user), mode 600.
+    - /opt/testwise/secrets/firebase-adminsdk.json:/repo/apps/api/secrets/firebase-adminsdk.json:ro
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_healthy }
+  stop_grace_period: 40s
+  healthcheck:
+    test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+    interval: 10s
+    timeout: 4s
+    retries: 5
+    start_period: 30s
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: testwise-postgres
+    restart: unless-stopped
+    networks: [internal]
+    shm_size: 1gb
+    environment:
+      POSTGRES_USER: testwise
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: testwise
+    command: >
+      postgres
+      -c max_connections=200 -c shared_buffers=2GB -c effective_cache_size=12GB
+      -c maintenance_work_mem=256MB -c work_mem=16MB -c random_page_cost=1.1
+      -c wal_compression=on -c checkpoint_timeout=15min -c max_wal_size=4GB -c jit=off
+      -c log_min_duration_statement=500
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testwise -d testwise"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: testwise-redis
+    restart: unless-stopped
+    networks: [internal]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "volatile-lru"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot: apply database migrations before any API process starts.
+  migrate:
+    image: testwise-api:latest
+    build: { context: ../.., dockerfile: deploy/oracle/Dockerfile, target: api }
+    networks: [internal]
+    restart: "no"
+    environment:
+      DATABASE_URL: postgresql://testwise:${POSTGRES_PASSWORD}@postgres:5432/testwise
+    command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api1:
+    <<: *api
+    container_name: testwise-api1
+    ports: ["127.0.0.1:4001:4000"]
+    environment: { <<: *api-env, DUELS_ENGINE_ENABLED: "false", ANSWER_ANALYSIS_ENABLED: "false" }
+
+  api2:
+    <<: *api
+    container_name: testwise-api2
+    ports: ["127.0.0.1:4002:4000"]
+    environment: { <<: *api-env, DUELS_ENGINE_ENABLED: "false", ANSWER_ANALYSIS_ENABLED: "false" }
+
+  # Owns the in-memory duel engine and the answer-analysis job; also serves all Socket.IO traffic.
+  worker:
+    <<: *api
+    container_name: testwise-worker
+    ports: ["127.0.0.1:4010:4000"]
+    environment: { <<: *api-env, DUELS_ENGINE_ENABLED: "true", ANSWER_ANALYSIS_ENABLED: "true" }
+
+  livekit:
+    image: livekit/livekit-server:v1.9
+    container_name: testwise-livekit
+    restart: unless-stopped
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "127.0.0.1:7880:7880"
+      - "7881:7881/tcp"
+      - "7882:7882/udp"
+    networks: [internal]
+
+  caddy:
+    image: testwise-caddy:latest
+    build: { context: ../.., dockerfile: deploy/oracle/Dockerfile, target: caddy }
+    container_name: testwise-caddy
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [api1, api2, worker]
+
+networks:
+  internal: {}
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+  private_uploads:
+  caddy_data:
+  caddy_config:
