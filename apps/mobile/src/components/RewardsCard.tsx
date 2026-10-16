@@ -37,7 +37,7 @@ function Burst({ run }: { run: number }) {
  * Daily check-in, streak and level. The app displays what the server reports and asks to claim; the amount, the day and
  * the daily cap are all decided on the server, so a modified app cannot mint coins.
  */
-export function RewardsCard() {
+export function RewardsCard({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const { config } = useSession();
@@ -65,6 +65,41 @@ export function RewardsCard() {
   }
 
   const next = r.milestones.find((m) => !m.reached);
+  const claimButton = (
+    <Animated.View style={{ transform: [{ scale: press }] }}>
+      <Pressable
+        accessibilityRole="button"
+        disabled={!r.daily.claimable || busy}
+        onPress={claim}
+        onPressIn={() => Animated.spring(press, { toValue: 0.96, useNativeDriver: true }).start()}
+        onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true }).start()}
+        style={[styles.claim, compact && styles.claimCompact, (!r.daily.claimable || busy) && { opacity: 0.55 }]}
+      >
+        <Ionicons name={r.daily.claimable ? 'gift' : 'checkmark-circle'} size={18} color="#1F2937" />
+        <AppText weight="extrabold" size={14} color="#1F2937">{r.daily.claimable ? t('rewards.claim', { coins: r.daily.todayCoins }) : t('rewards.claimed')}</AppText>
+      </Pressable>
+    </Animated.View>
+  );
+
+  // Home screen: a single row with today's gift and the streak. The full level and 7-day grid is on the wallet screen.
+  if (compact) {
+    return (
+      <View style={[styles.card, styles.compact]}>
+        <View style={styles.levelBadge}><Ionicons name="gift" size={22} color="#1F2937" /></View>
+        <View style={{ flex: 1 }}>
+          <AppText weight="extrabold" size={15} color="#FFFFFF">{t('rewards.title')}</AppText>
+          <AppText size={12} color="rgba(255,255,255,0.75)" numberOfLines={1}>
+            {r.daily.streak > 0 ? `🔥 ${t('rewards.streak', { n: r.daily.streak })}` : t('rewards.compactHint')}
+          </AppText>
+        </View>
+        <View>
+          {claimButton}
+          <Burst run={burst} />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.card}>
       <View style={styles.head}>
@@ -92,19 +127,7 @@ export function RewardsCard() {
       </View>
 
       <View>
-        <Animated.View style={{ transform: [{ scale: press }] }}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={!r.daily.claimable || busy}
-            onPress={claim}
-            onPressIn={() => Animated.spring(press, { toValue: 0.96, useNativeDriver: true }).start()}
-            onPressOut={() => Animated.spring(press, { toValue: 1, useNativeDriver: true }).start()}
-            style={[styles.claim, (!r.daily.claimable || busy) && { opacity: 0.55 }]}
-          >
-            <Ionicons name={r.daily.claimable ? 'gift' : 'checkmark-circle'} size={18} color="#1F2937" />
-            <AppText weight="extrabold" size={14} color="#1F2937">{r.daily.claimable ? t('rewards.claim', { coins: r.daily.todayCoins }) : t('rewards.claimed')}</AppText>
-          </Pressable>
-        </Animated.View>
+        {claimButton}
         <Burst run={burst} />
       </View>
       <AppText size={11} color="rgba(255,255,255,0.6)">
@@ -125,6 +148,8 @@ const styles = StyleSheet.create({
   day: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)' },
   dayToday: { borderWidth: 1.5, borderColor: palette.amber },
   dayDone: { backgroundColor: palette.green },
+  compact: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  claimCompact: { height: 40, paddingHorizontal: 14 },
   claim: { height: 46, borderRadius: radius.md, backgroundColor: palette.amber, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   burst: { position: 'absolute', left: 0, right: 0, top: 10, alignItems: 'center' },
 });

@@ -6,6 +6,7 @@ import type { ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { Header } from '../../components/Header';
+import { RewardsCard } from '../../components/RewardsCard';
 import { AppText, Button, Card, ErrorState, Loading, Screen, StateView } from '../../components/ui';
 import { BalanceCard, TxnRow, useWallet } from '../../components/Wallet';
 import { api } from '../../lib/api';
@@ -54,6 +55,8 @@ export default function WalletHome() {
           {settings.redemptionsEnabled && <Action icon="gift-outline" label={t('wallet.rewards')} onPress={() => router.push('/wallet/rewards')} disabled={wallet.frozen} />}
           <Action icon="bag-check-outline" label={t('wallet.myRewards')} onPress={() => router.push('/wallet/redemptions')} />
         </View>
+
+        <RewardsCard />
 
         <Card>
           <AppText weight="bold" size={16} style={{ marginBottom: 4 }}>{t('wallet.history')}</AppText>
