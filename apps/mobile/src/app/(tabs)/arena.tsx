@@ -70,25 +70,28 @@ export default function Arena() {
 
       {tab === 'tournaments' && (
         <>
-          <View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-              {(['live', 'upcoming', 'past'] as Group[]).map((g) => (
-                <Chip key={g} theme={arena} label={t(`tournament.${g}`)} active={group === g} onPress={() => setGroup(g)} />
-              ))}
-              <View style={styles.sep} />
-              <Chip theme={arena} label={t('arena.allExams')} active={!examId} onPress={() => setExamId(undefined)} />
-              {exams.data?.map((e) => (
-                <Chip key={e.id} theme={arena} label={L(e.nameEn, e.nameHi) ?? e.nameEn} active={examId === e.id} onPress={() => setExamId(examId === e.id ? undefined : e.id)} />
-              ))}
-              {paidAllowed && (
-                <>
-                  <View style={styles.sep} />
-                  <Chip theme={arena} label={t('arena.freeOnly')} active={entry === 'FREE'} onPress={() => setEntry(entry === 'FREE' ? undefined : 'FREE')} />
-                  <Chip theme={arena} label={t('arena.paidOnly')} active={entry === 'PAID'} onPress={() => setEntry(entry === 'PAID' ? undefined : 'PAID')} />
-                </>
-              )}
-            </ScrollView>
+          {/* Row 1: when. Row 2: which exam (and free/paid). Two short rows read easier than one long scrolling strip. */}
+          <View style={styles.groups}>
+            {(['live', 'upcoming', 'past'] as Group[]).map((g) => (
+              <Chip key={g} theme={arena} label={t(`tournament.${g}`)} active={group === g} onPress={() => setGroup(g)} />
+            ))}
           </View>
+          {(!!exams.data?.length || paidAllowed) && (
+            <View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+                <Chip theme={arena} label={t('arena.allExams')} active={!examId && !entry} onPress={() => { setExamId(undefined); setEntry(undefined); }} />
+                {exams.data?.map((e) => (
+                  <Chip key={e.id} theme={arena} label={L(e.nameEn, e.nameHi) ?? e.nameEn} active={examId === e.id} onPress={() => setExamId(examId === e.id ? undefined : e.id)} />
+                ))}
+                {paidAllowed && (
+                  <>
+                    <Chip theme={arena} label={t('arena.freeOnly')} active={entry === 'FREE'} onPress={() => setEntry(entry === 'FREE' ? undefined : 'FREE')} />
+                    <Chip theme={arena} label={t('arena.paidOnly')} active={entry === 'PAID'} onPress={() => setEntry(entry === 'PAID' ? undefined : 'PAID')} />
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          )}
           {list.isLoading ? (
             <Loading theme={arena} />
           ) : list.error ? (
@@ -119,9 +122,6 @@ const styles = StyleSheet.create({
   segment: { flexDirection: 'row', marginHorizontal: 20, padding: 4, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.07)' },
   segBtn: { flex: 1, alignItems: 'center', paddingVertical: 10, borderRadius: 10 },
   segOn: { backgroundColor: '#FFFFFF' },
-  filters: { paddingHorizontal: 20, paddingVertical: 16, gap: 8, alignItems: 'center' },
-  sep: { width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.15)', marginHorizontal: 4 },
-  orbit: { width: 280, height: 280, alignItems: 'center', justifyContent: 'center', marginTop: 12 },
-  orbitRing: { position: 'absolute', borderRadius: 999, borderWidth: 1, borderColor: 'rgba(96,165,250,0.25)' },
-  soon: { flexDirection: 'row', gap: 6, alignItems: 'center', marginTop: 20, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: 'rgba(245,158,11,0.12)' },
+  groups: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, paddingTop: 16 },
+  filters: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, gap: 8, alignItems: 'center' },
 });

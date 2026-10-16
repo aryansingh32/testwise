@@ -23,6 +23,15 @@ function Row({ icon, label, right, onPress, danger }: { icon: keyof typeof Ionic
   );
 }
 
+function Group({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={{ marginTop: 24 }}>
+      <AppText weight="bold" size={13} muted style={{ marginBottom: 8, marginLeft: 4 }}>{title}</AppText>
+      <Card style={{ paddingVertical: 4 }}>{children}</Card>
+    </View>
+  );
+}
+
 export default function Profile() {
   const { t } = useTranslation();
   const L = useLocalized();
@@ -73,7 +82,13 @@ export default function Profile() {
           </View>
         )}
 
-        <Card style={{ marginTop: 24, paddingVertical: 4 }}>
+        <Group title={t('profile.sectionProgress')}>
+          <Row icon="analytics-outline" label={t('analysis.title')} onPress={() => router.push('/analysis')} />
+          {config?.['wallet.settings']?.enabled && <Row icon="wallet-outline" label={t('wallet.title')} onPress={() => router.push('/wallet')} />}
+          <Row icon="receipt-outline" label={t('orders.title')} onPress={() => router.push('/orders')} />
+        </Group>
+
+        <Group title={t('profile.sectionSettings')}>
           <Row
             icon="language"
             label={t('profile.language')}
@@ -88,15 +103,14 @@ export default function Profile() {
               </View>
             }
           />
+          <Row icon="notifications-outline" label={t('push.settings')} onPress={() => router.push('/notification-settings')} />
           <Row icon="settings-outline" label={t('profile.settings')} onPress={() => router.push('/settings')} />
-          <Row icon="analytics-outline" label={t('analysis.title')} onPress={() => router.push('/analysis')} />
-          {config?.['wallet.settings']?.enabled && <Row icon="wallet-outline" label={t('wallet.title')} onPress={() => router.push('/wallet')} />}
-          <Row icon="receipt-outline" label={t('orders.title')} onPress={() => router.push('/orders')} />
-          <Row icon="notifications-outline" label={t('notifications.title')} onPress={() => router.push('/notifications')} />
-          <Row icon="options-outline" label={t('push.settings')} onPress={() => router.push('/notification-settings')} />
           <Row icon="shield-checkmark-outline" label={t('profile.privacy')} onPress={() => router.push('/privacy')} />
+        </Group>
+
+        <Group title={t('profile.sectionHelp')}>
           <Row icon="help-circle-outline" label={t('profile.help')} onPress={() => router.push('/support')} />
-        </Card>
+        </Group>
 
         <Card style={{ marginTop: 16, paddingVertical: 4 }}>
           <Row icon="log-out-outline" label={t('profile.logout')} onPress={logout} danger right={<View />} />

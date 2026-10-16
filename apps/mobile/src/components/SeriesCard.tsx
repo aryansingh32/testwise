@@ -20,7 +20,7 @@ export function SeriesCard({ s }: { s: SeriesCardDto }) {
           {s.badgeEn && <Pill label={L(s.badgeEn, s.badgeHi) ?? ''} color="rgba(255,255,255,0.25)" />}
           {s.enrolled && <Pill label={t('store.enrolled')} color={palette.green} icon="checkmark" />}
         </View>
-        <AppText weight="extrabold" size={20} color="#FFFFFF" numberOfLines={2} style={{ marginTop: 'auto' }}>{L(s.titleEn, s.titleHi)}</AppText>
+        <AppText weight="extrabold" size={18} color="#FFFFFF" numberOfLines={2} style={{ marginTop: 'auto' }}>{L(s.titleEn, s.titleHi)}</AppText>
       </View>
       <View style={styles.cardBody}>
         <View style={{ flex: 1 }}>
@@ -38,7 +38,7 @@ export function SeriesCard({ s }: { s: SeriesCardDto }) {
 
 const styles = StyleSheet.create({
   card: { borderRadius: radius.xl, overflow: 'hidden', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#F1F2F4', shadowColor: '#0F172A', shadowOpacity: 0.06, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 2 },
-  cover: { height: 150, padding: 18, overflow: 'hidden' },
+  cover: { height: 112, padding: 16, overflow: 'hidden' },
   coverCircle: { position: 'absolute', right: -40, top: -40, width: 170, height: 170, borderRadius: 85, backgroundColor: 'rgba(255,255,255,0.15)' },
-  cardBody: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
+  cardBody: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, gap: 12 },
 });
