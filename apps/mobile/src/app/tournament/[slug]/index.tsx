@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTournamentClock } from '../../../components/TournamentCard';
+import { useCoinPrice } from '../../../components/Wallet';
 import { TournamentActions } from '../../../components/TournamentActions';
 import { AppText, ErrorState, Loading, Pill, Screen, arena } from '../../../components/ui';
 import { api } from '../../../lib/api';
@@ -57,6 +58,8 @@ export default function TournamentDetail() {
   const { data: d, error, isLoading, refetch } = useQuery({
     queryKey: ['tournament', slug],
     queryFn: () => api<TournamentDetailDto>(`/v1/tournaments/${slug}`, { auth: false }),
+    // Status is time-driven on the server (registration opens/closes, goes live); keep the screen in step with it.
+    refetchInterval: (q) => (['SCHEDULED', 'REG_OPEN', 'REG_CLOSED', 'LIVE'].includes(q.state.data?.status ?? '') ? 20_000 : false),
   });
 
   if (isLoading) return <Screen theme={arena}><Loading theme={arena} /></Screen>;
@@ -65,6 +68,7 @@ export default function TournamentDetail() {
 }
 
 function Detail({ d, insetsBottom, language, t, L }: { d: TournamentDetailDto; insetsBottom: number; language: 'EN' | 'HI'; t: ReturnType<typeof useTranslation>['t']; L: ReturnType<typeof useLocalized> }) {
+  const coinPrice = useCoinPrice();
   const clock = useTournamentClock(d);
   const fill = Math.min(1, d.participantCount / d.maxParticipants);
   const el = d.eligibility;
@@ -165,7 +169,7 @@ function Detail({ d, insetsBottom, language, t, L }: { d: TournamentDetailDto; i
               <AppText size={13} theme={arena} muted>{t('tournament.freeEntry')}</AppText>
             ) : (
               <>
-                <KV k={t('tournament.entryFee')} v={formatRupees(d.entryFeePaise)} strong />
+                <KV k={t('tournament.entryFee')} v={coinPrice(d.entryFeePaise)} strong />
                 {d.platformFeePercent > 0 && <KV k={t('tournament.platformFee')} v={`${d.platformFeePercent}%`} />}
               </>
             )}

@@ -1,16 +1,23 @@
 import { Ionicons } from '@expo/vector-icons';
 import { formatRupees, type TournamentCardDto } from '@testwise/shared';
+import { useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTranslation } from 'react-i18next';
+import { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { compact, useCountdown, useLocalized } from '../lib/format';
 import { palette, radius } from '../theme/tokens';
 import { AppText, Pill } from './ui';
+import { useCoinPrice } from './Wallet';
+
+/** Every query whose payload carries a tournament's status; refreshed when a countdown runs out. */
+const STATUS_QUERIES = ['tournament', 'tournaments', 'tournament-me', 'home', 'my-tournaments'];
 
 /** Which countdown matters most for a tournament right now. */
-export function useTournamentClock(t: Pick<TournamentCardDto, 'status' | 'registrationOpensAt' | 'registrationClosesAt' | 'startsAt' | 'endsAt'>) {
+export function useTournamentClock(t: Pick<TournamentCardDto, 'slug' | 'status' | 'registrationOpensAt' | 'registrationClosesAt' | 'startsAt' | 'endsAt'>) {
   const { t: tr } = useTranslation();
+  const qc = useQueryClient();
   const target =
     t.status === 'LIVE' ? t.endsAt : t.status === 'SCHEDULED' ? t.registrationOpensAt : t.status === 'REG_OPEN' ? t.registrationClosesAt : t.startsAt;
   const label =
@@ -23,6 +30,15 @@ export function useTournamentClock(t: Pick<TournamentCardDto, 'status' | 'regist
           : tr('tournament.startsIn');
   const c = useCountdown(target);
   const active = ['LIVE', 'SCHEDULED', 'REG_OPEN', 'REG_CLOSED'].includes(t.status);
+  // The server moves the status a few seconds after the target time. Without this the screen sits on 00:00:00 until a manual refresh.
+  const expired = active && c.done;
+  useEffect(() => {
+    if (!expired) return;
+    const sync = () => void qc.invalidateQueries({ predicate: (q) => STATUS_QUERIES.includes(q.queryKey[0] as string) });
+    sync();
+    const id = setInterval(sync, 3000); // stops on its own: once the status changes, `expired` flips back to false
+    return () => clearInterval(id);
+  }, [expired, t.status, qc]);
   return { label, value: c.label, active };
 }
 
@@ -30,6 +46,7 @@ export function TournamentCard({ t, width }: { t: TournamentCardDto; width?: num
   const { t: tr } = useTranslation();
   const L = useLocalized();
   const clock = useTournamentClock(t);
+  const coinPrice = useCoinPrice();
   const fill = t.maxParticipants ? Math.min(1, t.participantCount / t.maxParticipants) : 0;
   const reward = t.prizePoolPaise > 0 ? formatRupees(t.prizePoolPaise) : L(t.topRewardEn, t.topRewardHi);
 
@@ -51,7 +68,7 @@ export function TournamentCard({ t, width }: { t: TournamentCardDto; width?: num
             {t.exam && <Pill label={L(t.exam.nameEn, t.exam.nameHi) ?? ''} color="rgba(255,255,255,0.12)" />}
           </View>
           <AppText weight="extrabold" size={12} color={t.entryMode === 'FREE' ? '#6EE7B7' : '#FCD34D'}>
-            {t.entryMode === 'FREE' ? tr('common.free') : formatRupees(t.entryFeePaise)}
+            {t.entryMode === 'FREE' ? tr('common.free') : coinPrice(t.entryFeePaise)}
           </AppText>
         </View>
 

@@ -493,6 +493,7 @@ const hi: Translations = {
     splitHint: 'खरीदे गए कॉइन मर्चेंडाइज़ और वाउचर के लिए हैं। केवल अर्जित कॉइन UPI पर जा सकते हैं।',
     frozen: 'आपका वॉलेट रोका गया है। सहायता से संपर्क करें।',
     topUp: 'टॉप-अप',
+    notEnoughToBuy: 'इसके लिए आपको और {{coin}} चाहिए। वॉलेट टॉप-अप करके फिर कोशिश करें।',
     rewards: 'पुरस्कार',
     myRewards: 'मेरे पुरस्कार',
     history: 'कॉइन इतिहास',
@@ -547,7 +548,7 @@ const hi: Translations = {
     status: { PENDING: 'लंबित', APPROVED: 'स्वीकृत', FULFILLED: 'मिल गया', REJECTED: 'अस्वीकृत', CANCELLED: 'रद्द', FAILED: 'असफल' },
     txn: {
       TOPUP: 'टॉप-अप', TOPUP_REFUND: 'टॉप-अप रिफंड', EARN_PRIZE: 'पुरस्कार', EARN_DUEL: 'मुकाबला जीत', ADMIN_CREDIT: 'बोनस',
-      ADMIN_DEBIT: 'सुधार', REDEEM_HOLD: 'पुरस्कार अनुरोध', REDEEM_RELEASE: 'कॉइन लौटाए', REDEEM_SETTLE: 'पुरस्कार रिडीम', DUEL_ENTRY: 'मुकाबला एंट्री', DUEL_REFUND: 'एंट्री वापस', DUEL_PRIZE: 'मुकाबला इनाम', GAME_REWARD: 'इनाम मिला',
+      ADMIN_DEBIT: 'सुधार', REDEEM_HOLD: 'पुरस्कार अनुरोध', REDEEM_RELEASE: 'कॉइन लौटाए', REDEEM_SETTLE: 'पुरस्कार रिडीम', DUEL_ENTRY: 'मुकाबला एंट्री', DUEL_REFUND: 'एंट्री वापस', DUEL_PRIZE: 'मुकाबला इनाम', GAME_REWARD: 'इनाम मिला', SPEND: 'खरीदारी', SPEND_REFUND: 'खरीदारी वापस',
     },
   },
   maintenance: { title: 'जल्द वापस आएँगे' },

@@ -632,11 +632,12 @@ export class ProctoringService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async sessions(q: { tournamentId?: string; status?: string; practice?: boolean }) {
+  async sessions(q: { tournamentId?: string; testId?: string; status?: string; practice?: boolean }) {
     const rows = await this.prisma.proctorSession.findMany({
       where: {
         ...(q.tournamentId && { tournamentId: q.tournamentId }),
         ...(q.practice && { tournamentId: null }),
+        ...(q.testId && { tournamentId: null, testId: q.testId }),
         ...(q.status ? { status: q.status as ProctorSession['status'] } : { status: 'ACTIVE' }),
       },
       include: sessionInclude,
@@ -668,13 +669,14 @@ export class ProctoringService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async flags(q: { status?: string; severity?: string; type?: string; tournamentId?: string; userId?: string }) {
+  async flags(q: { status?: string; severity?: string; type?: string; tournamentId?: string; testId?: string; userId?: string }) {
     const rows = await this.prisma.proctorFlag.findMany({
       where: {
         ...(q.status ? { status: q.status as ProctorFlag['status'] } : { status: 'OPEN' }),
         ...(q.severity && { severity: { in: q.severity.split(',') as FlagSeverity[] } }),
         ...(q.type && { type: q.type }),
         ...(q.tournamentId && { tournamentId: q.tournamentId }),
+        ...(q.testId && { tournamentId: null, session: { testId: q.testId } }),
         ...(q.userId && { userId: q.userId }),
       },
       orderBy: [{ createdAt: 'desc' }],
@@ -690,16 +692,30 @@ export class ProctoringService implements OnModuleInit, OnModuleDestroy {
     return dtos.sort((a, b) => order[a.severity] - order[b.severity] || b.occurredAt.localeCompare(a.occurredAt));
   }
 
-  /** Tournaments with proctoring on, and live counts, for the proctoring dashboard. */
+  /** Proctored tournaments and practice tests, with live counts, for the proctoring dashboard. Listed as soon as proctoring is switched on, before any student has started. */
   async overview() {
-    const now = new Date();
-    const ts = await this.prisma.tournament.findMany({
-      where: { proctorMode: { not: 'OFF' }, OR: [{ status: 'LIVE' }, { startsAt: { gte: new Date(now.getTime() - 3 * 86_400_000), lte: new Date(now.getTime() + 7 * 86_400_000) } }] },
-      orderBy: { startsAt: 'asc' },
-      select: { id: true, titleEn: true, slug: true, status: true, startsAt: true, endsAt: true, proctorMode: true, entryFeePaise: true, rewardType: true, _count: { select: { registrations: { where: { status: 'CONFIRMED' } } } } },
-    });
-    const counts = await this.prisma.proctorSession.groupBy({ by: ['tournamentId', 'status'], where: { tournamentId: { in: ts.map((t) => t.id) } }, _count: true });
-    const open = await this.prisma.proctorFlag.groupBy({ by: ['tournamentId', 'severity'], where: { status: 'OPEN', tournamentId: { in: ts.map((t) => t.id) } }, _count: true });
+    const now = Date.now();
+    const [ts, tests] = await Promise.all([
+      this.prisma.tournament.findMany({
+        where: {
+          proctorMode: { not: 'OFF' },
+          status: { notIn: ['DRAFT', 'CANCELLED'] },
+          OR: [{ status: { in: ['SCHEDULED', 'REG_OPEN', 'REG_CLOSED', 'LIVE', 'IN_REVIEW'] } }, { startsAt: { gte: new Date(now - 14 * 86_400_000) } }],
+        },
+        orderBy: { startsAt: 'asc' },
+        select: { id: true, titleEn: true, slug: true, status: true, startsAt: true, endsAt: true, proctorMode: true, entryFeePaise: true, rewardType: true, _count: { select: { registrations: { where: { status: 'CONFIRMED' } } } } },
+      }),
+      this.prisma.test.findMany({
+        where: { proctorMode: { not: 'OFF' }, status: 'PUBLISHED' },
+        orderBy: { titleEn: 'asc' },
+        select: { id: true, titleEn: true, proctorMode: true },
+        take: 200,
+      }),
+    ]);
+    const tIds = ts.map((t) => t.id);
+    const testIds = tests.map((t) => t.id);
+    const counts = await this.prisma.proctorSession.groupBy({ by: ['tournamentId', 'testId', 'status'], where: { OR: [{ tournamentId: { in: tIds } }, { tournamentId: null, testId: { in: testIds } }] }, _count: true });
+    const open = await this.prisma.proctorFlag.groupBy({ by: ['tournamentId', 'severity'], where: { status: 'OPEN', tournamentId: { in: tIds } }, _count: true });
     const [openTotal, critical, activeTotal] = await Promise.all([
       this.prisma.proctorFlag.count({ where: { status: 'OPEN' } }),
       this.prisma.proctorFlag.count({ where: { status: 'OPEN', severity: 'CRITICAL' } }),
@@ -716,6 +732,11 @@ export class ProctoringService implements OnModuleInit, OnModuleDestroy {
         ended: counts.filter((c) => c.tournamentId === t.id && c.status !== 'ACTIVE').reduce((n, c) => n + c._count, 0),
         openFlags: open.filter((o) => o.tournamentId === t.id).reduce((n, o) => n + o._count, 0),
         criticalFlags: open.find((o) => o.tournamentId === t.id && o.severity === 'CRITICAL')?._count ?? 0,
+      })),
+      tests: tests.map((t) => ({
+        ...t,
+        active: counts.find((c) => !c.tournamentId && c.testId === t.id && c.status === 'ACTIVE')?._count ?? 0,
+        ended: counts.filter((c) => !c.tournamentId && c.testId === t.id && c.status !== 'ACTIVE').reduce((n, c) => n + c._count, 0),
       })),
     };
   }

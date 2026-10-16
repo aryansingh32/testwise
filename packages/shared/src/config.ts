@@ -336,7 +336,7 @@ export const CONFIG_REGISTRY = {
       autoApproveBelowCoins: z.number().int().min(0).max(1_000_000),
     }),
     default: {
-      enabled: false,
+      enabled: true,
       coinNameEn: 'Coins',
       coinNameHi: 'कॉइन',
       coinValuePaise: 10,

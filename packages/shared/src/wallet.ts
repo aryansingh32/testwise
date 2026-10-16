@@ -17,7 +17,9 @@ export type WalletTxnType =
   | 'DUEL_ENTRY'
   | 'DUEL_REFUND'
   | 'DUEL_PRIZE'
-  | 'GAME_REWARD';
+  | 'GAME_REWARD'
+  | 'SPEND'
+  | 'SPEND_REFUND';
 
 export const REWARD_KIND_INFO: Record<RewardKind, { labelEn: string; labelHi: string; icon: string }> = {
   MERCH: { labelEn: 'Merchandise', labelHi: 'मर्चेंडाइज़', icon: 'shirt' },

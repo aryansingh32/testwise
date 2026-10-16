@@ -21,3 +21,8 @@ export function winnerCountFromTiers(tiers: PrizeTier[]): number {
 export function pickLang<T extends string | null | undefined>(en: T, hi: T, lang: 'EN' | 'HI'): T {
   return lang === 'HI' && hi ? hi : en;
 }
+
+/** Price in coins for a rupee amount, rounded up so the platform never undercharges. */
+export function paiseToCoins(paise: number, coinValuePaise: number): number {
+  return paise <= 0 ? 0 : Math.ceil(paise / Math.max(1, coinValuePaise));
+}

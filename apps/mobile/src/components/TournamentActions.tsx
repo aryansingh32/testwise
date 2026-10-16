@@ -1,16 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
-import { formatRupees, type CheckoutDto, type MyTournamentStateDto, type TournamentDetailDto } from '@testwise/shared';
+import { type CheckoutDto, type MyTournamentStateDto, type TournamentDetailDto } from '@testwise/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
-import { api, ApiError } from '../lib/api';
+import { api } from '../lib/api';
 import { newKey, useLocalized } from '../lib/format';
 import { routeToDeviceCheck } from '../lib/proctor/startProctored';
 import { palette } from '../theme/tokens';
 import { CheckoutSheet } from './Checkout';
 import { AppText, Button } from './ui';
+import { useCoinPrice, usePurchaseError } from './Wallet';
 import { useTournamentClock } from './TournamentCard';
 
 /** Footer actions for a tournament, driven entirely by the server's view of this student's state. */
@@ -19,12 +20,14 @@ export function TournamentActions({ d }: { d: TournamentDetailDto }) {
   const L = useLocalized();
   const qc = useQueryClient();
   const clock = useTournamentClock(d);
+  const coinPrice = useCoinPrice();
+  const purchaseError = usePurchaseError();
   const [checkout, setCheckout] = useState<CheckoutDto | null>(null);
   const [busy, setBusy] = useState(false);
   const { data: me, refetch } = useQuery({
     queryKey: ['tournament-me', d.slug],
     queryFn: () => api<MyTournamentStateDto>(`/v1/tournaments/${d.slug}/me`),
-    refetchInterval: d.status === 'LIVE' || d.status === 'REG_OPEN' ? 20_000 : false,
+    refetchInterval: ['SCHEDULED', 'REG_OPEN', 'REG_CLOSED', 'LIVE'].includes(d.status) ? 20_000 : false,
   });
 
   const refresh = () => {
@@ -39,7 +42,7 @@ export function TournamentActions({ d }: { d: TournamentDetailDto }) {
     try {
       await fn();
     } catch (e) {
-      Alert.alert(t('common.error'), e instanceof ApiError ? (e.status === 0 ? t('common.offline') : e.message) : String(e));
+      purchaseError(e);
     } finally {
       setBusy(false);
     }
@@ -49,6 +52,7 @@ export function TournamentActions({ d }: { d: TournamentDetailDto }) {
     run(async () => {
       const r = await api<{ status: string; checkout: CheckoutDto | null }>(`/v1/tournaments/${d.slug}/register`, { method: 'POST', body: { idempotencyKey: newKey() } });
       if (r.checkout && !r.checkout.completed) setCheckout(r.checkout);
+      void qc.invalidateQueries({ queryKey: ['wallet'] });
       refresh();
     });
 
@@ -70,7 +74,7 @@ export function TournamentActions({ d }: { d: TournamentDetailDto }) {
 
   const reg = me?.registration;
   const status = reg?.status;
-  const fee = d.entryMode === 'FREE' ? t('common.free') : formatRupees(d.entryFeePaise);
+  const fee = d.entryMode === 'FREE' ? t('common.free') : coinPrice(d.entryFeePaise);
 
   let badge: { icon: keyof typeof Ionicons.glyphMap; text: string; color: string } | null = null;
   if (status === 'CONFIRMED') badge = { icon: 'checkmark-circle', text: t('register.registered'), color: palette.green };

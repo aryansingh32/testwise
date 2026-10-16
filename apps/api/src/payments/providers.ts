@@ -26,6 +26,8 @@ export interface PaymentProvider {
   verifySignature(rawBody: Buffer, headers: Record<string, string | string[] | undefined>): boolean;
   parseWebhook(body: unknown): WebhookOutcome;
   refund(input: { providerPaymentId: string; amountPaise: number; receiptNo: string }): Promise<{ providerRefundId: string }>;
+  /** Ask the gateway whether an order was paid. Backstop for a missed webhook. */
+  fetchStatus?(providerOrderId: string): Promise<{ paid: boolean; paymentId: string | null; amountPaise: number | null }>;
 }
 
 const safeEqual = (a: string, b: string) => {
@@ -81,11 +83,12 @@ export class RazorpayProvider implements PaymentProvider {
     return !!(this.keyId && this.keySecret && this.webhookSecret);
   }
 
-  private async call<T>(path: string, body: unknown): Promise<T> {
+  private async call<T>(path: string, body?: unknown): Promise<T> {
     const res = await fetch(`https://api.razorpay.com/v1${path}`, {
-      method: 'POST',
+      method: body === undefined ? 'GET' : 'POST',
       headers: { 'content-type': 'application/json', authorization: `Basic ${Buffer.from(`${this.keyId}:${this.keySecret}`).toString('base64')}` },
-      body: JSON.stringify(body),
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(10_000),
     });
     const json = (await res.json()) as T & { error?: { description?: string } };
     if (!res.ok) throw new Error(`Razorpay: ${json.error?.description ?? res.statusText}`);
@@ -100,10 +103,20 @@ export class RazorpayProvider implements PaymentProvider {
       description: input.description.slice(0, 2048),
       customer: { name: input.customer.name, ...(input.customer.email && { email: input.customer.email }) },
       notify: { sms: false, email: false },
+      // Razorpay redirects here after payment; the in-app payment page watches for it and closes itself.
+      callback_url: `${process.env.PUBLIC_BASE_URL ?? 'https://testwise.duckdns.org'}/payment-return`,
+      callback_method: 'get',
       expire_by: Math.floor(Date.now() / 1000) + 30 * 60,
       notes: { receipt: input.receiptNo },
     });
     return { providerOrderId: link.id, checkoutUrl: link.short_url, keyId: this.keyId };
+  }
+
+  async fetchStatus(providerOrderId: string) {
+    const link = await this.call<{ status: string; amount_paid?: number; payments?: { payment_id: string; amount: number; status: string }[] | null }>(`/payment_links/${encodeURIComponent(providerOrderId)}`);
+    if (link.status !== 'paid') return { paid: false, paymentId: null, amountPaise: null };
+    const pay = link.payments?.find((p) => p.status === 'captured') ?? link.payments?.[0];
+    return { paid: true, paymentId: pay?.payment_id ?? null, amountPaise: pay?.amount ?? link.amount_paid ?? null };
   }
 
   verifySignature(rawBody: Buffer, headers: Record<string, string | string[] | undefined>) {
@@ -126,9 +139,8 @@ export class RazorpayProvider implements PaymentProvider {
     if (b.event === 'payment_link.paid') {
       return { eventId, type: 'PAYMENT_CAPTURED', providerOrderId: b.payload.payment_link?.entity.id ?? null, providerPaymentId: payment?.id ?? null, amountPaise: payment?.amount ?? null };
     }
-    if (b.event === 'payment.failed') {
-      return { eventId, type: 'PAYMENT_FAILED', providerOrderId: null, providerPaymentId: payment?.id ?? null, amountPaise: payment?.amount ?? null, failureReason: payment?.error_description };
-    }
+    // payment.failed carries no payment-link id, and the customer can retry on the same link, so it never fails an order.
+    // An unpaid link simply expires (order expiry job).
     if (b.event === 'refund.processed') {
       return { eventId, type: 'REFUND_PROCESSED', providerOrderId: null, providerPaymentId: b.payload.refund?.entity.payment_id ?? null, amountPaise: b.payload.refund?.entity.amount ?? null };
     }

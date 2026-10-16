@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type SeriesStatus } from '@prisma/client';
-import type { CheckoutDto, SeriesCardDto, SeriesDetailDto, SeriesInput } from '@testwise/shared';
+import { paiseToCoins, type CheckoutDto, type SeriesCardDto, type SeriesDetailDto, type SeriesInput } from '@testwise/shared';
 import { AttemptsService } from '../attempts/attempts.service';
 import { AuditService, type AuditActor } from '../common/audit.service';
 import { PrismaService } from '../common/prisma.service';
 import { PaymentsService } from '../payments/payments.service';
+import { WalletService } from '../wallet/wallet.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 const cardInclude = {
@@ -20,6 +21,7 @@ export class StoreService {
     private readonly attempts: AttemptsService,
     private readonly audit: AuditService,
     private readonly notifications: NotificationsService,
+    private readonly wallet: WalletService,
   ) {}
 
   private activeEnrollment(userId: string) {
@@ -90,9 +92,10 @@ export class StoreService {
       });
       return { enrolled: true, checkout: null };
     }
-    const order = await this.payments.singleFlight(input.idempotencyKey, () =>
+    // Coin-only: the wallet pays. Throws "Not enough coins" (and creates nothing) if the balance is short.
+    await this.payments.singleFlight(input.idempotencyKey, () =>
       this.prisma.$transaction(async (tx) => {
-        const o = await this.payments.createOrder(
+        const o = await this.payments.createCoinOrder(
           { userId, kind: 'SERIES_PURCHASE', refId: s.id, descriptionEn: `Test series: ${s.titleEn}`, amountPaise: s.pricePaise, couponCode: input.couponCode, idempotencyKey: input.idempotencyKey },
           tx,
         );
@@ -100,14 +103,16 @@ export class StoreService {
         return o;
       }),
     );
-    return { enrolled: order.status === 'PAID', checkout: await this.payments.checkout(order) };
+    return { enrolled: true, checkout: null };
   }
 
   async quote(slug: string, couponCode: string) {
     const s = await this.prisma.testSeries.findUnique({ where: { slug } });
     if (!s) throw new NotFoundException('Test series not found');
     const { discountPaise } = await this.payments.quoteCoupon(couponCode, 'SERIES_PURCHASE', s.pricePaise);
-    return { pricePaise: s.pricePaise, discountPaise, payablePaise: s.pricePaise - discountPaise };
+    const { coinValuePaise } = await this.wallet.settings();
+    const payableCoins = paiseToCoins(s.pricePaise - discountPaise, coinValuePaise);
+    return { pricePaise: s.pricePaise, discountPaise, payablePaise: s.pricePaise - discountPaise, payableCoins, discountCoins: paiseToCoins(s.pricePaise, coinValuePaise) - payableCoins };
   }
 
   // ------------------------------------------------------------- Admin

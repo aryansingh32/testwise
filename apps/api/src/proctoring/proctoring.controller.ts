@@ -140,8 +140,8 @@ export class AdminProctorController {
 
   @Get('sessions')
   @RequirePermission(Permission.PROCTOR_VIEW)
-  sessions(@Query('tournamentId') tournamentId?: string, @Query('status') status?: string, @Query('practice') practice?: string) {
-    return this.proctoring.sessions({ tournamentId, status, practice: practice === '1' });
+  sessions(@Query('tournamentId') tournamentId?: string, @Query('testId') testId?: string, @Query('status') status?: string, @Query('practice') practice?: string) {
+    return this.proctoring.sessions({ tournamentId, testId, status, practice: practice === '1' });
   }
 
   @Get('sessions/:id')
@@ -152,8 +152,8 @@ export class AdminProctorController {
 
   @Get('flags')
   @RequirePermission(Permission.PROCTOR_VIEW)
-  flags(@Query('status') status?: string, @Query('severity') severity?: string, @Query('type') type?: string, @Query('tournamentId') tournamentId?: string, @Query('userId') userId?: string) {
-    return this.proctoring.flags({ status, severity, type, tournamentId, userId });
+  flags(@Query('status') status?: string, @Query('severity') severity?: string, @Query('type') type?: string, @Query('tournamentId') tournamentId?: string, @Query('userId') userId?: string, @Query('testId') testId?: string) {
+    return this.proctoring.flags({ status, severity, type, tournamentId, testId, userId });
   }
 
   @Post('flags/:id/review')

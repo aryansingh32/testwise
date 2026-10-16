@@ -10,7 +10,7 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma, type Order, type OrderKind } from '@prisma/client';
-import { formatRupees, type CheckoutDto, type OrderDto } from '@testwise/shared';
+import { formatRupees, paiseToCoins, type CheckoutDto, type OrderDto } from '@testwise/shared';
 import { createHash, randomBytes } from 'crypto';
 import { AppConfigService } from '../app-config/app-config.service';
 import { AuditService, type AuditActor } from '../common/audit.service';
@@ -20,7 +20,7 @@ import { PrismaService } from '../common/prisma.service';
 import { XpService } from '../engagement/engagement.services';
 import { NotificationsService } from '../notifications/notifications.service';
 import { whenVar } from '../notifications/vars';
-import { Account, LedgerService } from './ledger.service';
+import { Account, LedgerService, type AccountName } from './ledger.service';
 import { MockProvider, PaytmProvider, RazorpayProvider, type PaymentProvider, type ProviderName, type WebhookOutcome } from './providers';
 
 type Tx = Prisma.TransactionClient;
@@ -168,6 +168,59 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Buy something with wallet coins. Prices are stored in rupees; the coin price is the rupee amount converted at the
+   * wallet's coin value, rounded up. The order is created already PAID (provider COINS) so fulfilment, cancellation and
+   * refunds work exactly as for gateway orders. Runs inside the caller's transaction: if the coins are not there, nothing is created.
+   */
+  async createCoinOrder(
+    input: { userId: string; kind: OrderKind; refId: string; descriptionEn: string; amountPaise: number; couponCode?: string | null; idempotencyKey: string },
+    tx: Tx,
+  ): Promise<Order> {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${input.idempotencyKey}, 0))`;
+    const existing = await tx.order.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+    if (existing) {
+      if (existing.userId !== input.userId || existing.refId !== input.refId) throw new ConflictException('Idempotency key reused for a different purchase');
+      return existing;
+    }
+    const { discountPaise, coupon } = await this.quoteCoupon(input.couponCode, input.kind, input.amountPaise);
+    const { coinValuePaise } = await this.wallet.settings();
+    const coins = paiseToCoins(input.amountPaise - discountPaise, coinValuePaise);
+    const payablePaise = coins * coinValuePaise;
+    if (coupon) await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { increment: 1 } } });
+    const order = await tx.order.create({
+      data: {
+        receiptNo: receiptNo(), userId: input.userId, kind: input.kind, refId: input.refId, descriptionEn: input.descriptionEn,
+        amountPaise: payablePaise, discountPaise, couponCode: coupon?.code ?? null, provider: coins > 0 ? 'COINS' : 'NONE', idempotencyKey: input.idempotencyKey,
+        status: 'PAID', paidAt: new Date(), expiresAt: new Date(),
+      },
+    });
+    if (coins === 0) return order;
+
+    const split = await this.wallet.spendForOrder(tx, input.userId, order.id, coins, input.descriptionEn.slice(0, 120));
+    let prize = 0;
+    let tournamentId: string | null = null;
+    if (input.kind === 'TOURNAMENT_ENTRY') {
+      const reg = await tx.registration.findUnique({ where: { id: input.refId }, include: { tournament: true } });
+      if (reg) {
+        tournamentId = reg.tournamentId;
+        if (reg.tournament.fundingSource === 'ENTRY_FEES') prize = payablePaise - Math.round((payablePaise * reg.tournament.platformFeePercent) / 100);
+      }
+    }
+    await this.ledger.post(
+      [
+        { account: Account.COIN_LIABILITY_PURCHASED, debit: split.fromPurchased * coinValuePaise },
+        { account: Account.COIN_LIABILITY_EARNED, debit: split.fromEarned * coinValuePaise },
+        { account: Account.PRIZE_POOL_LIABILITY, credit: prize },
+        { account: Account.PLATFORM_REVENUE, credit: payablePaise - prize },
+      ],
+      { memo: `capture ${order.receiptNo}`, orderId: order.id, tournamentId },
+      tx,
+    );
+    await this.notifications.event('PAYMENT_SUCCESS', input.userId, { amount: `${coins} coins`, item: input.descriptionEn, receipt: order.receiptNo }, { link: `/orders/${order.id}`, tx });
+    return order;
+  }
+
   async checkout(order: Order): Promise<CheckoutDto> {
     const full = await this.prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: orderInclude });
     return {
@@ -186,8 +239,23 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async myOrder(userId: string, id: string) {
-    const o = await this.prisma.order.findUnique({ where: { id }, include: orderInclude });
+    let o = await this.prisma.order.findUnique({ where: { id }, include: orderInclude });
     if (!o || o.userId !== userId) throw new NotFoundException('Order not found');
+    // The app polls this while the payment page is open. If the webhook has not landed yet (or never will), ask the gateway directly.
+    if (o.status === 'CREATED' && o.providerOrderId) {
+      const p = this.providers[o.provider as ProviderName];
+      if (p?.fetchStatus) {
+        try {
+          const st = await p.fetchStatus(o.providerOrderId);
+          if (st.paid) {
+            await this.applyOutcome(p.name, { eventId: `poll:${o.providerOrderId}`, type: 'PAYMENT_CAPTURED', providerOrderId: o.providerOrderId, providerPaymentId: st.paymentId, amountPaise: st.amountPaise });
+            o = await this.prisma.order.findUniqueOrThrow({ where: { id }, include: orderInclude });
+          }
+        } catch (e) {
+          this.logger.warn(`Status check for order ${id} failed: ${(e as Error).message}`);
+        }
+      }
+    }
     return toOrderDto(o);
   }
 
@@ -373,6 +441,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     const refunded = order.refunds.filter((r) => ['REQUESTED', 'APPROVED', 'PROCESSED'].includes(r.status)).reduce((s, r) => s + r.amountPaise, 0);
     const amount = amountPaise ?? order.amountPaise - refunded;
     if (amount <= 0 || amount + refunded > order.amountPaise) throw new BadRequestException('Refund exceeds the amount paid');
+    if (order.provider === 'COINS' && (amount !== order.amountPaise || refunded > 0)) throw new BadRequestException('Orders paid with coins can only be refunded in full');
     if (order.kind === 'COIN_TOPUP') {
       if (amount !== order.amountPaise || refunded > 0) throw new BadRequestException('Coin top-ups can only be refunded in full');
       await this.wallet.assertTopUpRefundable(order);
@@ -428,6 +497,7 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
     let providerRefundId: string;
     try {
       if (order.provider === 'NONE') providerRefundId = 'no-payment';
+      else if (order.provider === 'COINS') providerRefundId = 'coins';
       else providerRefundId = (await this.provider(order.provider).refund({ providerPaymentId: order.providerPaymentId!, amountPaise: r.amountPaise, receiptNo: order.receiptNo })).providerRefundId;
     } catch (e) {
       await this.prisma.refund.update({ where: { id: r.id }, data: { status: 'FAILED' } });
@@ -446,11 +516,21 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
       const prizeCredit = capture.filter((c) => c.account === Account.PRIZE_POOL_LIABILITY).reduce((s, c) => s + c.creditPaise, 0);
       const prizePart = order.amountPaise ? Math.round((r.amountPaise * prizeCredit) / order.amountPaise) : 0;
       if (order.kind === 'COIN_TOPUP') await this.wallet.reverseTopUp(tx, order);
+      // Coin orders go back to the wallet, not the gateway.
+      let credits: { account: AccountName; credit: number }[] = [{ account: Account.GATEWAY_RECEIVABLE, credit: r.amountPaise }];
+      if (order.provider === 'COINS') {
+        const { coinValuePaise } = await this.wallet.settings();
+        const split = await this.wallet.refundSpend(tx, order.userId, order.id, `Refund: ${order.descriptionEn}`.slice(0, 120));
+        credits = [
+          { account: Account.COIN_LIABILITY_PURCHASED, credit: (split?.fromPurchased ?? 0) * coinValuePaise },
+          { account: Account.COIN_LIABILITY_EARNED, credit: (split?.fromEarned ?? 0) * coinValuePaise },
+        ];
+      }
       await this.ledger.post(
         [
           { account: Account.PRIZE_POOL_LIABILITY, debit: prizePart },
           { account: order.kind === 'COIN_TOPUP' ? Account.COIN_LIABILITY_PURCHASED : Account.PLATFORM_REVENUE, debit: r.amountPaise - prizePart },
-          { account: Account.GATEWAY_RECEIVABLE, credit: r.amountPaise },
+          ...credits,
         ],
         { memo: `refund ${order.receiptNo}`, orderId: order.id, tournamentId: capture[0]?.tournamentId ?? null },
         tx,
@@ -488,8 +568,8 @@ export class PaymentsService implements OnModuleInit, OnModuleDestroy {
   /** Gateway-captured totals vs ledger, for the reconciliation view. */
   async reconciliation() {
     const [paid, refunds, events, balances] = await Promise.all([
-      this.prisma.order.aggregate({ where: { status: { in: ['PAID', 'REFUND_PENDING', 'REFUNDED'] } }, _sum: { amountPaise: true }, _count: true }),
-      this.prisma.refund.aggregate({ where: { status: 'PROCESSED' }, _sum: { amountPaise: true }, _count: true }),
+      this.prisma.order.aggregate({ where: { provider: { not: 'COINS' }, status: { in: ['PAID', 'REFUND_PENDING', 'REFUNDED'] } }, _sum: { amountPaise: true }, _count: true }),
+      this.prisma.refund.aggregate({ where: { status: 'PROCESSED', order: { provider: { not: 'COINS' } } }, _sum: { amountPaise: true }, _count: true }),
       this.prisma.paymentEvent.groupBy({ by: ['provider', 'type'], _count: true, where: { error: null } }),
       this.ledger.balances(),
     ]);

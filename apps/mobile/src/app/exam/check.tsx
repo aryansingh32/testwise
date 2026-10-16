@@ -11,13 +11,13 @@ import FaceDetection from '@react-native-ml-kit/face-detection';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { AudioModule } from 'expo-audio';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { AppText, Button, Card, Screen } from '../../components/ui';
 import { api, ApiError } from '../../lib/api';
 import { attest, confirmAttestedKey, fetchChallenge, forgetAttestedKey } from '../../lib/proctor/attest';
 import { connectLive, disconnectLive } from '../../lib/proctor/live';
-import { measureNetwork } from '../../lib/proctor/netcheck';
+import { measureNetwork, type NetworkResult } from '../../lib/proctor/netcheck';
 import { collectDevice, collectIntegrity } from '../../lib/proctor/report';
 import { useSession } from '../../lib/session';
 import { palette } from '../../theme/tokens';
@@ -53,6 +53,73 @@ export default function DeviceCheck() {
   const camera = useRef<CameraView>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [showCamera, setShowCamera] = useState(true);
+  // Readiness checks that run as soon as the screen opens, so problems show up before the student agrees to anything.
+  const [net, setNet] = useState<{ state: 'testing' | 'done' | 'error'; r?: NetworkResult }>({ state: 'testing' });
+  const [micGranted, setMicGranted] = useState<boolean | null>(null);
+  const [micCanAsk, setMicCanAsk] = useState(true);
+
+  const probeNet = useCallback(async () => {
+    setNet({ state: 'testing' });
+    try {
+      setNet({ state: 'done', r: await measureNetwork() });
+    } catch {
+      setNet({ state: 'error' });
+    }
+  }, []);
+  useEffect(() => {
+    void probeNet();
+    if (needMic) {
+      AudioModule.getRecordingPermissionsAsync().then((p) => { setMicGranted(p.granted); setMicCanAsk(p.canAskAgain); }).catch(() => setMicGranted(false));
+    }
+  }, [probeNet, needMic]);
+  const netWeak = !!policy && !!net.r && (net.r.rttMs > policy.maxRttMs || net.r.downMbps < policy.minDownMbps);
+  const camOk = !needCamera || !!camPerm?.granted;
+  const micOk = !needMic || micGranted === true;
+  const netOk = !features.connectionCheck || (net.state === 'done' && !netWeak);
+  const ready = camOk && micOk && netOk;
+
+  async function allowCamera() {
+    if (camPerm && !camPerm.granted && !camPerm.canAskAgain) return void Linking.openSettings();
+    await requestCam();
+  }
+  async function allowMic() {
+    if (!micCanAsk) return void Linking.openSettings();
+    const p = await AudioModule.requestRecordingPermissionsAsync();
+    setMicGranted(p.granted);
+    setMicCanAsk(p.canAskAgain);
+  }
+  const checks: { key: string; icon: keyof typeof Ionicons.glyphMap; title: string; state: 'ok' | 'wait' | 'bad' | 'info'; detail: string; action?: { label: string; onPress: () => void } }[] = [
+    ...(features.connectionCheck
+      ? [{
+          key: 'net', icon: 'wifi' as const, title: tx('Internet connection', 'इंटरनेट कनेक्शन'),
+          state: net.state === 'testing' ? 'wait' as const : net.state === 'error' || netWeak ? 'bad' as const : 'ok' as const,
+          detail: net.state === 'testing' ? tx('Testing speed and delay…', 'स्पीड और देरी जाँची जा रही है…')
+            : net.state === 'error' || !net.r ? tx('Could not reach the server. Check your internet.', 'सर्वर तक नहीं पहुँच सके। इंटरनेट जाँचें।')
+              : `${Math.round(net.r.rttMs)} ms · ${net.r.downMbps.toFixed(1)} Mbps${netWeak ? ` — ${tx('too weak for this test', 'इस टेस्ट के लिए कमज़ोर')}` : ''}`,
+          action: net.state === 'testing' ? undefined : { label: tx('Test again', 'फिर जाँचें'), onPress: () => void probeNet() },
+        }]
+      : []),
+    ...(needCamera
+      ? [{
+          key: 'cam', icon: 'camera' as const, title: tx('Camera', 'कैमरा'),
+          state: camPerm?.granted ? 'ok' as const : 'bad' as const,
+          detail: camPerm?.granted ? tx('Allowed. Make sure your face is clearly visible below.', 'अनुमति मिली। नीचे अपना चेहरा साफ़ दिखाएँ।') : tx('Permission needed to take this test.', 'इस टेस्ट के लिए अनुमति ज़रूरी है।'),
+          action: camPerm?.granted ? undefined : { label: camPerm && !camPerm.canAskAgain ? tx('Open settings', 'सेटिंग खोलें') : tx('Allow', 'अनुमति दें'), onPress: () => void allowCamera() },
+        }]
+      : []),
+    ...(needMic
+      ? [{
+          key: 'mic', icon: 'mic' as const, title: tx('Microphone', 'माइक्रोफ़ोन'),
+          state: micGranted ? 'ok' as const : micGranted === null ? 'wait' as const : 'bad' as const,
+          detail: micGranted ? tx('Allowed.', 'अनुमति मिली।') : tx('Permission needed to take this test.', 'इस टेस्ट के लिए अनुमति ज़रूरी है।'),
+          action: micGranted || micGranted === null ? undefined : { label: micCanAsk ? tx('Allow', 'अनुमति दें') : tx('Open settings', 'सेटिंग खोलें'), onPress: () => void allowMic() },
+        }]
+      : []),
+    ...(needScreen
+      ? [{ key: 'screen', icon: 'phone-portrait' as const, title: tx('Screen sharing', 'स्क्रीन शेयरिंग'), state: 'info' as const, detail: tx('Android will ask you to share your screen when you tap Start. Choose “Entire screen”.', 'Start दबाने पर Android स्क्रीन शेयर करने को कहेगा। “Entire screen” चुनें।') }]
+      : []),
+    { key: 'device', icon: 'shield-checkmark' as const, title: tx('Device security', 'डिवाइस सुरक्षा'), state: 'info' as const, detail: tx('Verified with Google/Apple when you tap Start.', 'Start दबाने पर Google/Apple से सत्यापित होगा।') },
+  ];
 
   const purposes = [
     ...(features.connectionCheck ? [tx('Connection: we measure your internet speed and delay so the test does not break halfway.', 'कनेक्शन: हम आपकी इंटरनेट स्पीड और देरी मापते हैं ताकि टेस्ट बीच में न रुके।')] : []),
@@ -169,6 +236,22 @@ export default function DeviceCheck() {
         </View>
         <AppText size={14} muted>{tx('This test is proctored. You will be asked for permission once, here. Nothing is turned on before you agree.', 'यह टेस्ट निगरानी में है। आपसे अनुमति यहीं, एक बार माँगी जाएगी। सहमति से पहले कुछ भी चालू नहीं होता।')}</AppText>
 
+        <Card style={{ gap: 12 }}>
+          <AppText weight="bold" size={14}>{tx('System check', 'सिस्टम जाँच')}</AppText>
+          {checks.map((c) => (
+            <View key={c.key} style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              {c.state === 'wait' ? <ActivityIndicator size="small" color={palette.amber} /> : (
+                <Ionicons name={c.state === 'ok' ? 'checkmark-circle' : c.state === 'bad' ? 'close-circle' : 'information-circle'} size={22} color={c.state === 'ok' ? palette.green : c.state === 'bad' ? '#DC2626' : '#9CA3AF'} />
+              )}
+              <View style={{ flex: 1 }}>
+                <AppText weight="semibold" size={13}>{c.title}</AppText>
+                <AppText size={12} muted>{c.detail}</AppText>
+              </View>
+              {c.action && <AppText weight="bold" size={12} color={palette.blue} onPress={c.action.onPress}>{c.action.label}</AppText>}
+            </View>
+          ))}
+        </Card>
+
         <Card style={{ gap: 10 }}>
           <AppText weight="bold" size={14}>{tx('What we ask for, and why', 'हम क्या माँगते हैं, और क्यों')}</AppText>
           {purposes.map((m) => (
@@ -222,7 +305,7 @@ export default function DeviceCheck() {
         {busy ? (
           <View style={{ alignItems: 'center', gap: 8 }}><ActivityIndicator color={palette.amber} /><AppText size={13} muted>{phase}</AppText></View>
         ) : (
-          <Button title={step === 'blocked' ? tx('Check again', 'फिर से जाँचें') : tx('Agree & start test', 'सहमत हूँ और टेस्ट शुरू करें')} onPress={() => { void run(); }} disabled={!policy || !agreed || Platform.OS === 'web'} />
+          <Button title={step === 'blocked' ? tx('Check again', 'फिर से जाँचें') : tx('Agree & start test', 'सहमत हूँ और टेस्ट शुरू करें')} onPress={() => { void run(); }} disabled={!policy || !agreed || !ready || Platform.OS === 'web'} />
         )}
         <AppText size={13} muted style={{ textAlign: 'center' }} onPress={() => router.back()}>{tx('Cancel', 'रद्द करें')}</AppText>
       </View>

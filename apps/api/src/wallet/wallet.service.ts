@@ -234,6 +234,40 @@ export class WalletService {
     return { count: rows.length, coins: rows.reduce((n, r) => n - r.purchasedDelta - r.earnedDelta, 0) };
   }
 
+  // ------------------------------------------------------------- Purchases paid in coins
+
+  /**
+   * Take coins for an order (test series, tournament entry). Purchased coins go first so earned coins stay withdrawable.
+   * Idempotent per order: a replay returns the original split and moves nothing.
+   */
+  async spendForOrder(tx: Tx, userId: string, orderId: string, coins: number, memo: string) {
+    const s = await this.requireEnabled();
+    const w = await this.ensure(userId, tx);
+    if (w.frozen) throw new ForbiddenException('Your wallet is frozen. Contact support.');
+    const key = `spend:${orderId}`;
+    const seen = await tx.walletTxn.findUnique({ where: { idempotencyKey: key } });
+    if (seen) return { fromPurchased: -seen.purchasedDelta, fromEarned: -seen.earnedDelta, coinValuePaise: s.coinValuePaise };
+    if (w.purchased + w.earned < coins) throw new BadRequestException('Not enough coins. Top up your wallet to continue.');
+    const fromPurchased = Math.min(w.purchased, coins);
+    const fromEarned = coins - fromPurchased;
+    await this.move(tx, userId, 'SPEND', { purchased: -fromPurchased, earned: -fromEarned }, { memo, refType: 'Order', refId: orderId, idempotencyKey: key });
+    return { fromPurchased, fromEarned, coinValuePaise: s.coinValuePaise };
+  }
+
+  /** The split a coin order was paid with, or null if the order was not paid in coins. */
+  async spendSplit(tx: Tx, orderId: string) {
+    const t = await tx.walletTxn.findUnique({ where: { idempotencyKey: `spend:${orderId}` } });
+    return t ? { fromPurchased: -t.purchasedDelta, fromEarned: -t.earnedDelta } : null;
+  }
+
+  /** Give the coins of a refunded coin order back to the buckets they came from. */
+  async refundSpend(tx: Tx, userId: string, orderId: string, memo: string) {
+    const split = await this.spendSplit(tx, orderId);
+    if (!split) return null;
+    await this.move(tx, userId, 'SPEND_REFUND', { purchased: split.fromPurchased, earned: split.fromEarned }, { memo, refType: 'Order', refId: orderId, idempotencyKey: `spend-refund:${orderId}` });
+    return split;
+  }
+
   // ------------------------------------------------------------- Top-ups
 
   async packs(all = false) {

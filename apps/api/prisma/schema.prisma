@@ -1325,6 +1325,8 @@ enum WalletTxnType {
   DUEL_REFUND
   DUEL_PRIZE
   GAME_REWARD
+  SPEND
+  SPEND_REFUND
 }
 
 /// Append-only coin movements (DB trigger blocks UPDATE/DELETE). Deltas are signed.

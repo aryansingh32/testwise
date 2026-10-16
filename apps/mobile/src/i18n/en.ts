@@ -491,6 +491,7 @@ const en = {
     splitHint: 'Purchased coins work for merchandise and vouchers. Only earned coins can go to UPI.',
     frozen: 'Your wallet is frozen. Contact support.',
     topUp: 'Top up',
+    notEnoughToBuy: 'You need more {{coin}} for this. Top up your wallet and try again.',
     rewards: 'Rewards',
     myRewards: 'My rewards',
     history: 'Coin history',
@@ -545,7 +546,7 @@ const en = {
     status: { PENDING: 'Pending', APPROVED: 'Approved', FULFILLED: 'Delivered', REJECTED: 'Rejected', CANCELLED: 'Cancelled', FAILED: 'Failed' },
     txn: {
       TOPUP: 'Top-up', TOPUP_REFUND: 'Top-up refunded', EARN_PRIZE: 'Prize', EARN_DUEL: 'Duel win', ADMIN_CREDIT: 'Bonus',
-      ADMIN_DEBIT: 'Correction', REDEEM_HOLD: 'Reward requested', REDEEM_RELEASE: 'Coins returned', REDEEM_SETTLE: 'Reward redeemed', DUEL_ENTRY: 'Duel entry', DUEL_REFUND: 'Duel entry refunded', DUEL_PRIZE: 'Duel prize', GAME_REWARD: 'Reward earned',
+      ADMIN_DEBIT: 'Correction', REDEEM_HOLD: 'Reward requested', REDEEM_RELEASE: 'Coins returned', REDEEM_SETTLE: 'Reward redeemed', DUEL_ENTRY: 'Duel entry', DUEL_REFUND: 'Duel entry refunded', DUEL_PRIZE: 'Duel prize', GAME_REWARD: 'Reward earned', SPEND: 'Purchase', SPEND_REFUND: 'Purchase refunded',
     },
   },
   maintenance: { title: 'Back soon' },

@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import type { RedemptionStatus, RewardDto, WalletDto, WalletTxnDto } from '@testwise/shared';
+import { paiseToCoins, type RedemptionStatus, RewardDto, WalletDto, WalletTxnDto } from '@testwise/shared';
 import { useQuery } from '@tanstack/react-query';
 import type { ComponentProps } from 'react';
 import { useTranslation } from 'react-i18next';
-import { StyleSheet, View } from 'react-native';
-import { api } from '../lib/api';
+import { Alert, StyleSheet, View } from 'react-native';
+import { router } from 'expo-router';
+import { api, ApiError } from '../lib/api';
 import { formatDateTime } from '../lib/format';
 import { useSession } from '../lib/session';
 import { palette, radius } from '../theme/tokens';
@@ -36,6 +37,29 @@ export function useCoinName() {
 }
 
 export const fmtCoins = (n: number) => n.toLocaleString('en-IN');
+
+/** Error alert for a coin purchase. A short balance offers a straight path to the top-up screen. */
+export function usePurchaseError() {
+  const { t } = useTranslation();
+  const coinName = useCoinName();
+  return (e: unknown) => {
+    const msg = e instanceof ApiError ? (e.status === 0 ? t('common.offline') : e.message) : String(e);
+    if (e instanceof ApiError && /not enough coins/i.test(e.message)) {
+      Alert.alert(t('common.error'), t('wallet.notEnoughToBuy', { coin: coinName }), [
+        { text: t('common.cancel'), style: 'cancel' },
+        { text: t('wallet.topUp'), onPress: () => router.push('/wallet/topup') },
+      ]);
+    } else Alert.alert(t('common.error'), msg);
+  };
+}
+
+/** Formats a rupee-stored price (paise) as coins, e.g. "4,990 Coins". Prices are shown in coins only. */
+export function useCoinPrice() {
+  const { config } = useSession();
+  const coinName = useCoinName();
+  const cv = config?.['wallet.settings']?.coinValuePaise ?? 10;
+  return (paise: number) => `${fmtCoins(paiseToCoins(paise, cv))} ${coinName}`;
+}
 
 export const STATUS_COLOR: Record<RedemptionStatus, string> = {
   PENDING: palette.amber,
@@ -99,6 +123,8 @@ const TXN_ICON: Record<WalletTxnDto['type'], ComponentProps<typeof Ionicons>['na
   DUEL_REFUND: 'return-up-back',
   DUEL_PRIZE: 'trophy',
   GAME_REWARD: 'sparkles',
+  SPEND: 'bag-handle',
+  SPEND_REFUND: 'return-up-back',
 };
 
 /** One coin movement. Holds show as "on hold" rather than spent until settled. */

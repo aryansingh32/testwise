@@ -93,7 +93,7 @@ export class ProctoringGateway implements OnGatewayInit, OnGatewayDisconnect {
     if (d.kind !== 'admin') return { ok: false };
     for (const room of socket.rooms) if (room.startsWith('admins:')) await socket.leave(room);
     const scope = body?.scope ?? 'all';
-    await socket.join(scope === 'all' ? 'admins:all' : scope === 'practice' ? 'admins:practice' : `admins:t:${scope}`);
+    await socket.join(scope === 'all' ? 'admins:all' : scope === 'practice' || scope.startsWith('test:') ? 'admins:practice' : `admins:t:${scope}`);
     return { ok: true };
   }
 }

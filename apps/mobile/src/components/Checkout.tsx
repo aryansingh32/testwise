@@ -2,15 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { formatRupees, type CheckoutDto, type OrderDto } from '@testwise/shared';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AppState, Linking, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Linking, Modal, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 import { api, ApiError } from '../lib/api';
 import { palette, radius } from '../theme/tokens';
 import { AppText, Button } from './ui';
 
 /**
  * Payment sheet. MOCK gateway: simulated pay/fail (test mode, clearly labelled).
- * RAZORPAY: opens the hosted payment page, then polls the order until the webhook confirms it.
+ * RAZORPAY: shows the hosted payment page inside the app (WebView; browser fallback on web), then polls the order until it is confirmed.
  */
 export function CheckoutSheet({ checkout, onClose, onPaid }: { checkout: CheckoutDto | null; onClose: () => void; onPaid: (o: OrderDto) => void }) {
   const { t } = useTranslation();
@@ -20,25 +21,27 @@ export function CheckoutSheet({ checkout, onClose, onPaid }: { checkout: Checkou
   const paidRef = useRef(false);
   const orderId = checkout?.order.id;
   const hosted = !!checkout && checkout.provider !== 'MOCK';
+  const inApp = hosted && Platform.OS !== 'web' && !!checkout?.checkoutUrl;
+
+  const poll = async () => {
+    if (paidRef.current || !orderId) return;
+    try {
+      const r = await api<OrderDto>(`/v1/me/orders/${orderId}`);
+      if (r.status === 'PAID' && !paidRef.current) {
+        paidRef.current = true;
+        setMessage({ ok: true, text: t('checkout.success') });
+        onPaid(r);
+      } else if (r.status === 'FAILED' || r.status === 'CANCELLED') setMessage({ ok: false, text: t('checkout.failed') });
+    } catch {
+      /* transient network error: next tick retries */
+    }
+  };
 
   // Hosted gateway: confirm automatically (poll while open + when the user returns from the payment page).
   useEffect(() => {
     if (!hosted || !orderId) return;
     paidRef.current = false;
-    const poll = async () => {
-      if (paidRef.current) return;
-      try {
-        const r = await api<OrderDto>(`/v1/me/orders/${orderId}`);
-        if (r.status === 'PAID' && !paidRef.current) {
-          paidRef.current = true;
-          setMessage({ ok: true, text: t('checkout.success') });
-          onPaid(r);
-        } else if (r.status === 'FAILED' || r.status === 'CANCELLED') setMessage({ ok: false, text: t('checkout.failed') });
-      } catch {
-        /* transient network error: next tick retries */
-      }
-    };
-    const timer = setInterval(poll, 4000);
+    const timer = setInterval(poll, 3000);
     const sub = AppState.addEventListener('change', (st) => st === 'active' && void poll());
     return () => {
       clearInterval(timer);
@@ -78,6 +81,47 @@ export function CheckoutSheet({ checkout, onClose, onPaid }: { checkout: Checkou
     } finally {
       setBusy(false);
     }
+  }
+
+  if (inApp) {
+    return (
+      <Modal visible animationType="slide" onRequestClose={onClose}>
+        <View style={{ flex: 1, backgroundColor: '#FFFFFF', paddingTop: insets.top }}>
+          <View style={[styles.head, { paddingHorizontal: 16, paddingVertical: 12 }]}>
+            <View style={{ flex: 1 }}>
+              <AppText weight="extrabold" size={17}>{t('checkout.title')}</AppText>
+              <AppText size={12} muted numberOfLines={1}>{o.descriptionEn} · {formatRupees(o.amountPaise)}</AppText>
+            </View>
+            <Pressable onPress={onClose} hitSlop={10} accessibilityLabel={t('common.cancel')}><Ionicons name="close" size={24} color="#6B7280" /></Pressable>
+          </View>
+          {message && (
+            <View style={[styles.msg, { backgroundColor: message.ok ? '#ECFDF5' : '#FEF2F2', marginHorizontal: 16, marginBottom: 8 }]}>
+              <Ionicons name={message.ok ? 'checkmark-circle' : 'alert-circle'} size={18} color={message.ok ? palette.green : palette.red} />
+              <AppText size={13} color={message.ok ? '#065F46' : palette.red} style={{ flex: 1 }}>{message.text}</AppText>
+            </View>
+          )}
+          <WebView
+            source={{ uri: checkout.checkoutUrl! }}
+            style={{ flex: 1 }}
+            startInLoadingState
+            javaScriptEnabled
+            domStorageEnabled
+            setSupportMultipleWindows={false}
+            // UPI apps / banks open through app links (upi://, intent://, tez://...): hand them to the OS instead of failing in the WebView.
+            onShouldStartLoadWithRequest={(req) => {
+              if (/^https?:|^about:/i.test(req.url)) return true;
+              void Linking.openURL(req.url).catch(() => undefined);
+              return false;
+            }}
+            // Razorpay redirects to our /payment-return page after paying: confirm right away.
+            onNavigationStateChange={(nav) => nav.url.includes('/payment-return') && void poll()}
+          />
+          <View style={{ padding: 12, paddingBottom: 12 + insets.bottom }}>
+            <Button title={t('checkout.checkStatus')} variant="secondary" onPress={checkStatus} loading={busy} />
+          </View>
+        </View>
+      </Modal>
+    );
   }
 
   return (

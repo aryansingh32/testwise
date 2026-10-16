@@ -107,7 +107,7 @@ export class TournamentsService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     if (process.env.NODE_ENV === 'test') return;
     const run = () => void this.redis.withLock('job:tournament-lifecycle', 120_000, () => this.autoAdvance()).catch((e) => this.logger.error(e));
-    this.timer = setInterval(run, 15_000);
+    this.timer = setInterval(run, 5_000);
     run();
   }
 
@@ -116,7 +116,7 @@ export class TournamentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Time-based lifecycle, run every 15 seconds:
+   * Time-based lifecycle, run every 5 seconds (students watch a countdown hit zero, so keep the lag short):
    * open/close registration, go live (or cancel below the minimum), close the window and start review.
    */
   async autoAdvance() {

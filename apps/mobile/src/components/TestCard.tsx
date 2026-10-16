@@ -20,10 +20,7 @@ export function TestCard({ test }: { test: TestCardDto }) {
   const exhausted = test.attemptsUsed >= test.maxAttempts && !test.inProgressAttemptId;
 
   async function start() {
-    if (test.inProgressAttemptId) {
-      router.push({ pathname: '/exam/[attemptId]', params: { attemptId: test.inProgressAttemptId } });
-      return;
-    }
+    // Resuming also goes through the server: a proctored test needs a fresh device check (and live room) every time it is opened.
     setBusy(true);
     try {
       const paper = await api<{ attemptId: string }>(`/v1/tests/${test.id}/attempts`, { method: 'POST' });

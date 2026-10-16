@@ -211,7 +211,7 @@ export default function Home() {
   const { t } = useTranslation();
   const { user } = useSession();
   const { width } = useWindowDimensions();
-  const { data, error, isLoading, refetch, isRefetching } = useQuery({ queryKey: ['home'], queryFn: () => api<HomeDto>('/v1/home') });
+  const { data, error, isLoading, refetch, isRefetching } = useQuery({ queryKey: ['home'], queryFn: () => api<HomeDto>('/v1/home'), refetchInterval: 30_000 });
   const firstName = user?.displayName.split(' ')[0] ?? '';
 
   return (

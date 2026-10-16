@@ -43,6 +43,7 @@ export default function Arena() {
     queryKey: ['tournaments', query],
     queryFn: () => api<TournamentCardDto[]>(`/v1/tournaments?${query}`),
     enabled: tab === 'tournaments',
+    refetchInterval: 30_000,
   });
 
   const tabs: { key: Tab; label: string; show: boolean }[] = [

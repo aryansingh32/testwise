@@ -19,6 +19,12 @@ export class PublicController {
     return this.payments.handleWebhook(provider, req.rawBody ?? Buffer.from(JSON.stringify(req.body ?? {})), headers);
   }
 
+  /** Razorpay sends the payer here after paying. The in-app payment page closes itself on this URL; in a browser it is a plain thank-you. */
+  @Get('payment-return')
+  paymentReturn(@Res() res: Response) {
+    res.type('html').send('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Payment</title></head><body style="font-family:system-ui,sans-serif;text-align:center;padding:48px 16px"><h2>Thanks!</h2><p>Your payment is being confirmed. You can go back to the TestWise app.</p></body></html>');
+  }
+
   @Get('v1/results/verify/:code')
   verifyJson(@Param('code') code: string) {
     return this.results.verify(code);

@@ -1,12 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
-import { formatRupees, type CheckoutDto, type SeriesDetailDto } from '@testwise/shared';
+import { type SeriesDetailDto } from '@testwise/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CheckoutSheet } from '../../components/Checkout';
+import { useCoinPrice, usePurchaseError } from '../../components/Wallet';
 import { TestCard } from '../../components/TestCard';
 import { AppText, Button, ErrorState, Loading, Pill, Screen, useFont } from '../../components/ui';
 import { api, ApiError } from '../../lib/api';
@@ -23,8 +23,9 @@ export default function SeriesDetail() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
   const [coupon, setCoupon] = useState('');
-  const [quote, setQuote] = useState<{ code: string; discountPaise: number; payablePaise: number } | null>(null);
-  const [checkout, setCheckout] = useState<CheckoutDto | null>(null);
+  const [quote, setQuote] = useState<{ code: string; discountPaise: number; payablePaise: number; payableCoins: number; discountCoins: number } | null>(null);
+  const coinPrice = useCoinPrice();
+  const purchaseError = usePurchaseError();
   const [busy, setBusy] = useState(false);
   const { data: s, error, isLoading, refetch } = useQuery({ queryKey: ['series', slug], queryFn: () => api<SeriesDetailDto>(`/v1/store/series/${slug}`) });
 
@@ -40,7 +41,7 @@ export default function SeriesDetail() {
 
   async function applyCoupon() {
     try {
-      const r = await api<{ discountPaise: number; payablePaise: number }>(`/v1/store/series/${slug}/quote?coupon=${encodeURIComponent(coupon.trim())}`);
+      const r = await api<{ discountPaise: number; payablePaise: number; payableCoins: number; discountCoins: number }>(`/v1/store/series/${slug}/quote?coupon=${encodeURIComponent(coupon.trim())}`);
       setQuote({ code: coupon.trim().toUpperCase(), ...r });
     } catch (e) {
       setQuote(null);
@@ -51,11 +52,11 @@ export default function SeriesDetail() {
   async function buy() {
     setBusy(true);
     try {
-      const r = await api<{ enrolled: boolean; checkout: CheckoutDto | null }>(`/v1/store/series/${slug}/purchase`, { method: 'POST', body: { idempotencyKey: newKey(), couponCode: quote?.code ?? null } });
-      if (r.checkout && !r.checkout.completed) setCheckout(r.checkout);
-      else refresh();
+      await api<{ enrolled: boolean }>(`/v1/store/series/${slug}/purchase`, { method: 'POST', body: { idempotencyKey: newKey(), couponCode: quote?.code ?? null } });
+      void qc.invalidateQueries({ queryKey: ['wallet'] });
+      refresh();
     } catch (e) {
-      Alert.alert(t('common.error'), e instanceof ApiError ? e.message : String(e));
+      purchaseError(e);
     } finally {
       setBusy(false);
     }
@@ -104,20 +105,19 @@ export default function SeriesDetail() {
               <Pressable onPress={applyCoupon} disabled={!coupon.trim()} hitSlop={8}><AppText weight="bold" size={14} color={coupon.trim() ? palette.amber : '#9CA3AF'}>{t('store.apply')}</AppText></Pressable>
             </View>
           )}
-          {quote && quote.discountPaise > 0 && <AppText size={13} color={palette.green} weight="semibold">{t('store.couponSaved', { amount: formatRupees(quote.discountPaise) })}</AppText>}
+          {quote && quote.discountPaise > 0 && <AppText size={13} color={palette.green} weight="semibold">{t('store.couponSaved', { amount: coinPrice(quote.discountPaise) })}</AppText>}
         </View>
       </ScrollView>
 
       {!s.enrolled && (
         <View style={[styles.footer, { paddingBottom: 16 + insets.bottom }]}>
           <View>
-            <AppText weight="extrabold" size={22}>{price ? formatRupees(price) : t('common.free')}</AppText>
-            {s.mrpPaise && s.mrpPaise > price ? <AppText size={12} color="#9CA3AF" style={{ textDecorationLine: 'line-through' }}>{formatRupees(s.mrpPaise)}</AppText> : null}
+            <AppText weight="extrabold" size={22}>{price ? coinPrice(price) : t('common.free')}</AppText>
+            {s.mrpPaise && s.mrpPaise > price ? <AppText size={12} color="#9CA3AF" style={{ textDecorationLine: 'line-through' }}>{coinPrice(s.mrpPaise)}</AppText> : null}
           </View>
-          <Button title={s.pricePaise ? t('store.buy', { price: formatRupees(price) }) : t('store.unlockFree')} onPress={buy} loading={busy} style={{ flex: 1 }} />
+          <Button title={s.pricePaise ? t('store.buy', { price: coinPrice(price) }) : t('store.unlockFree')} onPress={buy} loading={busy} style={{ flex: 1 }} />
         </View>
       )}
-      <CheckoutSheet checkout={checkout} onClose={() => { setCheckout(null); refresh(); }} onPaid={() => { setTimeout(() => setCheckout(null), 900); refresh(); }} />
     </Screen>
   );
 }

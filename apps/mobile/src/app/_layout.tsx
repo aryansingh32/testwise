@@ -11,13 +11,14 @@ import {
   PlusJakartaSans_800ExtraBold,
   useFonts,
 } from '@expo-google-fonts/plus-jakarta-sans';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import Constants from 'expo-constants';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { AppState, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Screen, StateView, arena } from '../components/ui';
 import { ApiError } from '../lib/api';
@@ -25,6 +26,10 @@ import { SessionProvider, useSession } from '../lib/session';
 import { startPushListeners } from '../lib/push';
 
 void SplashScreen.preventAutoHideAsync();
+
+// React Native has no window focus: tell React Query when the app returns to the foreground so stale screens
+// (a tournament that went live while the phone was locked) refetch on their own.
+if (Platform.OS !== 'web') AppState.addEventListener('change', (s) => focusManager.setFocused(s === 'active'));
 
 function versionLess(a: string, b: string) {
   const pa = a.split('.').map(Number);

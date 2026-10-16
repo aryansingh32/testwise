@@ -20,6 +20,7 @@ interface Overview {
   liveConfigured: boolean;
   totals: { openFlags: number; criticalFlags: number; activeSessions: number };
   tournaments: { id: string; titleEn: string; slug: string; status: string; startsAt: string; proctorMode: string; registered: number; paidWithRewards: boolean; active: number; ended: number; openFlags: number; criticalFlags: number }[];
+  tests: { id: string; titleEn: string; proctorMode: string; active: number; ended: number }[];
 }
 
 const SEV_TONE: Record<FlagSeverity, 'gray' | 'amber' | 'red' | 'violet'> = { LOW: 'gray', MEDIUM: 'amber', HIGH: 'red', CRITICAL: 'violet' };
@@ -116,10 +117,17 @@ export function ProctoringPage() {
         <div className="ml-auto w-72">
           <Select value={scope} onChange={(e) => { pickedRef.current = true; setScope(e.target.value); }}>
             <option value="all">All exams (mixed)</option>
-            <option value="practice">Practice tests</option>
-            {o?.tournaments.map((t) => (
-              <option key={t.id} value={t.id}>{t.titleEn} · {t.proctorMode}{t.status === 'LIVE' ? ' · LIVE' : ''}</option>
-            ))}
+            <option value="practice">Practice tests (all)</option>
+            {!!o?.tournaments.length && <optgroup label="Tournaments">
+              {o.tournaments.map((t) => (
+                <option key={t.id} value={t.id}>{t.titleEn} · {t.proctorMode}{t.status === 'LIVE' ? ' · LIVE' : ` · ${t.status.replace('_', ' ').toLowerCase()}`}{t.active ? ` · ${t.active} taking` : ''}</option>
+              ))}
+            </optgroup>}
+            {!!o?.tests.length && <optgroup label="Practice tests">
+              {o.tests.map((t) => (
+                <option key={t.id} value={`test:${t.id}`}>{t.titleEn} · {t.proctorMode}{t.active ? ` · ${t.active} taking` : ''}</option>
+              ))}
+            </optgroup>}
           </Select>
         </div>
       </div>
@@ -160,13 +168,24 @@ function LiveWall({ scope, onOpen, overview }: { scope: string; onOpen: (id: str
   };
   const sessions = useQuery({
     queryKey: ['proctor-sessions', scope, status],
-    queryFn: () => api<ProctorSessionDto[]>(`/v1/admin/proctor/sessions?status=${status}${scope === 'all' ? '' : scope === 'practice' ? '&practice=1' : `&tournamentId=${scope}`}`),
+    queryFn: () => api<ProctorSessionDto[]>(`/v1/admin/proctor/sessions?status=${status}${scope === 'all' ? '' : scope === 'practice' ? '&practice=1' : scope.startsWith('test:') ? `&testId=${scope.slice(5)}` : `&tournamentId=${scope}`}`),
     refetchInterval: 20_000,
   });
   const rows = (sessions.data ?? []).filter((s) => !risk || s.trustBand === risk).sort((a, b) => a.trust - b.trust);
   const t = overview?.tournaments.find((x) => x.id === scope);
+  const pt = scope.startsWith('test:') ? overview?.tests.find((x) => `test:${x.id}` === scope) : undefined;
   return (
     <div className="mt-4">
+      {pt && (
+        <Card className="mb-4">
+          <div className="flex flex-wrap items-center gap-3 text-sm">
+            <span className="font-bold">{pt.titleEn}</span>
+            <Badge tone="blue">{PROCTOR_MODE_INFO[pt.proctorMode as keyof typeof PROCTOR_MODE_INFO]?.labelEn ?? pt.proctorMode}</Badge>
+            <Badge tone="gray">practice test</Badge>
+            <span className="text-gray-500">{pt.active} taking now · {pt.ended} finished</span>
+          </div>
+        </Card>
+      )}
       {t && (
         <Card className="mb-4">
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -315,7 +334,7 @@ function FlagsQueue({ scope, onOpen }: { scope: string; onOpen: (id: string) => 
   const [status, setStatus] = useState('OPEN');
   const [severity, setSeverity] = useState('');
   const [type, setType] = useState('');
-  const params = new URLSearchParams({ status, ...(severity && { severity }), ...(type && { type }), ...(scope !== 'all' && scope !== 'practice' && { tournamentId: scope }) });
+  const params = new URLSearchParams({ status, ...(severity && { severity }), ...(type && { type }), ...(scope.startsWith('test:') ? { testId: scope.slice(5) } : scope !== 'all' && scope !== 'practice' && { tournamentId: scope }) });
   const flags = useQuery({ queryKey: ['proctor-flags', params.toString()], queryFn: () => api<ProctorFlagDto[]>(`/v1/admin/proctor/flags?${params}`), refetchInterval: 20_000 });
   return (
     <Card className="mt-4">

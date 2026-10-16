@@ -133,7 +133,8 @@ export class RegistrationsService {
         create: { tournamentId: t.id, userId, status: 'PENDING_PAYMENT' },
         update: { status: 'PENDING_PAYMENT', cancelReason: null, orderId: null },
       });
-      const order = await this.payments.createOrder(
+      // Coin-only: entry is paid from the wallet; short balance throws "Not enough coins" and rolls the whole registration back.
+      const order = await this.payments.createCoinOrder(
         { userId, kind: 'TOURNAMENT_ENTRY', refId: reg.id, descriptionEn: `Entry: ${t.titleEn}`, amountPaise: t.entryFeePaise, couponCode: input.couponCode, idempotencyKey: input.idempotencyKey },
         tx,
       );

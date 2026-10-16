@@ -50,6 +50,72 @@ pnpm test                       # API unit tests
 cd apps/mobile && npx expo-doctor
 ```
 
+## Build the Android app (EAS)
+
+Production API: `https://testwise.duckdns.org` (already set in `apps/mobile/eas.json` for the `preview` and `production` profiles; `development` uses the emulator address `10.0.2.2:4000`). The app holds no Razorpay keys, so switching the gateway from test to live never needs a new build.
+
+One-time setup:
+
+```bash
+npm i -g eas-cli
+eas login
+cd apps/mobile
+eas init                      # links the project to your Expo account
+```
+
+`google-services.json` is git-ignored. For EAS cloud builds upload it as a file secret:
+
+```bash
+eas env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment production --visibility secret
+```
+
+Build:
+
+```bash
+cd apps/mobile
+pnpm typecheck                                  # sanity check first
+eas build -p android --profile preview          # installable .apk for testing on a phone
+eas build -p android --profile production       # signed .aab for the Play Store (versionCode auto-increments)
+```
+
+Local development build on an emulator or USB phone: `pnpm --filter @testwise/mobile android`.
+Before each Play release bump `expo.version` in `apps/mobile/app.json` (the build number is handled by `autoIncrement`).
+
+## Deploy to Google Play Console
+
+1. **Create the app** in Play Console (package `app.testwise.student`). Complete App content: privacy policy URL, Data safety, content rating, target audience, and the sensitive-permission declarations listed in [docs/PLAY-STORE-RELEASE.md](docs/PLAY-STORE-RELEASE.md).
+2. **First upload is manual.** Download the `.aab` from the EAS build page and upload it under Testing → Internal testing → Create release. Let Google manage app signing.
+3. **Later uploads can be automated.** Create a Google service account with Play Console access, save its JSON key (git-ignored), then:
+   ```bash
+   cd apps/mobile
+   eas submit -p android --profile production --path ./build.aab   # or --latest
+   ```
+   `eas.json` submits to the internal track as a draft; promote it in Play Console.
+4. **Test on internal testing**, add testers by email, then promote to Closed → Open → Production. New personal developer accounts must run a closed test with 12+ testers for 14 days before Production.
+5. **Copy the app-signing SHA-256** from Play Console → App integrity into Admin → Settings → Proctoring (Android signing-certificate digests).
+6. **Submit the Play Store URL to Razorpay** (Settings → Business details → app link) for Live activation. The app must be publicly reachable and you must give Razorpay demo login credentials (use a Firebase test phone number).
+
+## Deploy the server (Oracle Cloud VM)
+
+Details in [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md). Short version, once `ssh testwise` is configured in `~/.ssh/config`:
+
+```bash
+# from the repo root: sync source, then rebuild
+rsync -a --relative --exclude node_modules --exclude dist --exclude '.env*' --exclude secrets --exclude uploads --exclude private-uploads \
+  package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json packages/shared apps/api apps/admin apps/mobile/package.json deploy/oracle testwise:/opt/testwise/src/
+ssh testwise 'cd /opt/testwise; sudo docker compose --env-file .env -f src/deploy/oracle/docker-compose.yml up -d --build'
+```
+
+Server secrets live only in `/opt/testwise/app.env` (never in git). After editing it, recreate containers (a plain restart does not reload env):
+`sudo docker compose --env-file .env -f src/deploy/oracle/docker-compose.yml up -d --no-deps --force-recreate api1 api2 worker`.
+
+## Going live with Razorpay
+
+1. Razorpay Dashboard → switch to **Live Mode** → Account & Settings → API Keys → Generate Key (the secret is shown once).
+2. Live Mode → Settings → Webhooks: URL `https://testwise.duckdns.org/v1/payments/webhooks/razorpay`, events `payment_link.paid`, `payment.failed`, `refund.processed`, and a new random secret (separate from the test webhook).
+3. Put `RAZORPAY_KEY_ID` (`rzp_live_…`), `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` in `/opt/testwise/app.env` on the server and recreate the API containers as above. `PUBLIC_BASE_URL` must be `https://testwise.duckdns.org`.
+4. Admin → Settings → Payment gateway → **RAZORPAY**. Make a real ₹1 purchase, confirm the order turns PAID, then refund it.
+
 ## Temporary authentication
 
 Until the Firebase project exists, students sign in with email + password issued by the API (bcrypt, short-lived JWT + rotating refresh tokens). Google and mobile OTP buttons are built and controlled from **Admin → Settings → Login methods**; they stay off until Firebase / an SMS provider is connected. Admins use email + password; two-factor login arrives with Firebase.
